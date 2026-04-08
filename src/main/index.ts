@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, protocol, net, dialog } from 'electron'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import fs from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -173,6 +173,36 @@ app.whenReady().then(() => {
     } catch (error) {
       console.error('新建笔记失败:', error)
       return null
+    }
+  })
+  // --- 【新增】：重命名笔记 ---
+  ipcMain.handle('rename-file', async (_event, oldPath: string, newName: string) => {
+    try {
+      // 获取文件所在的目录
+      const dir = dirname(oldPath)
+      // 拼接新的文件路径 (别忘了加 .md 后缀)
+      const newPath = join(dir, `${newName}.md`)
+      // 如果新名字的文件已经存在，阻止重命名
+      if (fs.existsSync(newPath)) {
+        return { success: false, error: '文件名已存在' }
+      }
+      fs.renameSync(oldPath, newPath)
+      return { success: true, newPath }
+    } catch (error) {
+      console.error('重命名失败:', error)
+      return { success: false, error: '系统错误' }
+    }
+  })
+
+  // --- 【新增】：安全删除笔记 ---
+  ipcMain.handle('delete-file', async (_event, targetPath: string) => {
+    try {
+      // 强烈推荐！使用 shell.trashItem 会把文件放入系统的“回收站”，而不是永久销毁，给用户吃颗后悔药
+      await shell.trashItem(targetPath)
+      return true
+    } catch (error) {
+      console.error('删除失败:', error)
+      return false
     }
   })
   // 2. 读取单个笔记内容

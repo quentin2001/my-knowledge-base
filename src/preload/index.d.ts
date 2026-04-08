@@ -18,6 +18,11 @@ declare global {
       saveNote: (filePath: string, content: string) => Promise<boolean>
       // 【新增】它会返回我们定义好的 NoteFile 对象，或者失败时返回 null
       createNote: () => Promise<NoteFile | null>
+      renameFile: (
+        oldPath: string,
+        newName: string
+      ) => Promise<{ success: boolean; newPath?: string; error?: string }>
+      deleteFile: (targetPath: string) => Promise<boolean>
     }
   }
 }

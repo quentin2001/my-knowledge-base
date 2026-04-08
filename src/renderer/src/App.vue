@@ -12,12 +12,30 @@
           class="file-item"
           :class="{ 'is-active': activeFilePath === file.path }"
           @click="openNote(file)"
+          @contextmenu.prevent="showContextMenu($event, file)"
         >
-          📄 {{ file.name }}
+          📄
+          <input
+            v-if="renamingPath === file.path"
+            ref="renameInputRef"
+            v-model="renameInput"
+            class="rename-input"
+            @blur="submitRename"
+            @keyup.enter="submitRename"
+            @keyup.esc="cancelRename"
+          />
+          <span v-else>{{ file.name }}</span>
         </div>
       </div>
     </aside>
-
+    <div
+      v-if="contextMenu.show"
+      class="context-menu"
+      :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
+    >
+      <div class="menu-item" @click="startRename">✏️ 重命名</div>
+      <div class="menu-item delete" @click="deleteNote">🗑️ 删除</div>
+    </div>
     <main class="main-content">
       <TiptapEditor ref="editorRef" />
     </main>
@@ -25,8 +43,115 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick, onBeforeUnmount } from 'vue'
 import TiptapEditor from './components/TiptapEditor.vue'
+
+// ==================== 右键菜单与重命名逻辑 ====================
+
+// 右键菜单的状态
+const contextMenu = ref({
+  show: false,
+  x: 0,
+  y: 0,
+  file: null as NoteFile | null
+})
+
+// 重命名状态
+const renamingPath = ref('')
+const renameInput = ref('')
+const renameInputRef = ref<HTMLInputElement[] | null>(null)
+
+// 1. 显示右键菜单
+const showContextMenu = (event: MouseEvent, file: NoteFile): void => {
+  contextMenu.value = {
+    show: true,
+    x: event.clientX,
+    y: event.clientY,
+    file: file
+  }
+}
+
+// 2. 隐藏菜单 (点击其他地方时触发)
+const closeContextMenu = (): void => {
+  contextMenu.value.show = false
+}
+
+// 3. 开始重命名
+const startRename = async (): Promise<void> => {
+  if (!contextMenu.value.file) return
+  renamingPath.value = contextMenu.value.file.path
+  renameInput.value = contextMenu.value.file.name
+  closeContextMenu()
+
+  // 聚焦到输入框
+  await nextTick()
+  if (renameInputRef.value && renameInputRef.value.length > 0) {
+    renameInputRef.value[0].focus()
+    renameInputRef.value[0].select() // 默认全选文字，方便直接修改
+  }
+}
+
+// 4. 提交重命名
+const submitRename = async (): Promise<void> => {
+  if (!renamingPath.value) return
+  const oldPath = renamingPath.value
+  const newName = renameInput.value.trim()
+
+  // 如果名字没变或者为空，直接取消
+  if (!newName || newName === contextMenu.value.file?.name) {
+    cancelRename()
+    return
+  }
+
+  const result = await window.api.renameFile(oldPath, newName)
+  if (result.success) {
+    // 刷新左侧列表
+    await loadFiles()
+    // 如果重命名的是当前打开的文件，更新一下激活路径
+    if (activeFilePath.value === oldPath) {
+      activeFilePath.value = result.newPath!
+    }
+  } else {
+    alert(result.error)
+  }
+  cancelRename()
+}
+
+// 5. 取消重命名
+const cancelRename = (): void => {
+  renamingPath.value = ''
+  renameInput.value = ''
+}
+
+// 6. 删除文件
+const deleteNote = async (): Promise<void> => {
+  const file = contextMenu.value.file
+  if (!file) return
+  closeContextMenu()
+
+  // 给个二次确认，防止手滑
+  if (confirm(`确定要将 "${file.name}" 放入回收站吗？`)) {
+    const success = await window.api.deleteFile(file.path)
+    if (success) {
+      await loadFiles() // 重新加载列表
+      // 如果删除的是当前打开的文件，清空右侧编辑器
+      if (activeFilePath.value === file.path) {
+        activeFilePath.value = ''
+        if (editorRef.value) editorRef.value.loadContent('')
+      }
+    }
+  }
+}
+
+// 监听全局点击事件，用来关闭右键菜单
+onMounted(async () => {
+  window.addEventListener('click', closeContextMenu)
+  loadFiles()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('click', closeContextMenu)
+})
+// ========================================================
 
 // 【修复 1】：直接在前端定义这个接口，砍掉跨界 import，瞬间解决 tsconfig 和路径报错！
 interface NoteFile {
@@ -174,4 +299,49 @@ body {
   min-width: 0;
   /* 防止子元素撑破 Flex 布局 */
 }
+
+/* 重命名输入框 */
+.rename-input {
+  width: 80%;
+  background: #333;
+  border: 1px solid #555;
+  color: #fff;
+  border-radius: 3px;
+  padding: 2px 4px;
+  outline: none;
+  font-family: inherit;
+  font-size: 14px;
+}
+.rename-input:focus {
+  border-color: #68cef8;
+}
+
+/* 自定义右键菜单 */
+.context-menu {
+  position: fixed;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: 4px;
+  z-index: 9999;
+  min-width: 120px;
+}
+
+.context-menu .menu-item {
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #ccc;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.context-menu .menu-item:hover {
+  background: #444;
+  color: #fff;
+}
+.context-menu .menu-item.delete:hover {
+  background: #e03131;
+  color: #fff;
+} /* 删除按钮悬停变红 */
 </style>
