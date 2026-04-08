@@ -1,12 +1,8 @@
 <template>
   <div class="app-container">
-    <aside class="sidebar-files">
+    <aside class="sidebar-files" @contextmenu.prevent="showRootContextMenu($event)">
       <div class="sidebar-header">
         <span>📚 我的知识库</span>
-        <div class="header-actions">
-          <button class="new-btn" title="新建文件夹" @click="createNewFolder(null)">📁</button>
-          <button class="new-btn" title="新建笔记" @click="createNewNote(null)">➕</button>
-        </div>
       </div>
 
       <div class="file-list">
@@ -30,9 +26,12 @@
     >
       <div class="menu-item" @click="createNewNote(contextMenu.file)">📄 新建笔记</div>
       <div class="menu-item" @click="createNewFolder(contextMenu.file)">📁 新建文件夹</div>
-      <div class="divider"></div>
-      <div class="menu-item" @click="startRename">✏️ 重命名</div>
-      <div class="menu-item delete" @click="deleteNote">🗑️ 删除</div>
+
+      <template v-if="contextMenu.file !== null">
+        <div class="divider"></div>
+        <div class="menu-item" @click="startRename">✏️ 重命名</div>
+        <div class="menu-item delete" @click="deleteNote">🗑️ 删除</div>
+      </template>
     </div>
 
     <div v-if="renamingPath" class="rename-overlay">
@@ -61,9 +60,8 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, onBeforeUnmount } from 'vue'
 import TiptapEditor from './components/TiptapEditor.vue'
-import FileTreeNode from './components/FileTreeNode.vue' // 【引入魔法树组件】
+import FileTreeNode from './components/FileTreeNode.vue'
 
-// 核心类型定义
 interface FileNode {
   type: 'file' | 'folder'
   name: string
@@ -77,17 +75,12 @@ interface EditorComponent {
   loadContent: (content: string) => void
 }
 
-// 核心状态
 const notes = ref<FileNode[]>([])
 const activeFilePath = ref<string>('')
 const editorRef = ref<EditorComponent | null>(null)
-
-// 【状态记忆】：记住哪些文件夹是被展开的
 const openedFolders = ref<Set<string>>(new Set())
 
-// ==================== 文件树操作逻辑 ====================
-
-// 处理文件夹折叠/展开
+// 文件树操作逻辑
 const handleToggleFolder = (node: FileNode): void => {
   node.isOpen = !node.isOpen
   if (node.isOpen) {
@@ -97,7 +90,6 @@ const handleToggleFolder = (node: FileNode): void => {
   }
 }
 
-// 递归恢复文件夹的展开状态（因为刷新列表时数据会重载）
 const restoreFolderState = (nodes: FileNode[]): void => {
   for (const node of nodes) {
     if (node.type === 'folder') {
@@ -109,12 +101,12 @@ const restoreFolderState = (nodes: FileNode[]): void => {
 
 const loadFiles = async (): Promise<void> => {
   const fileList = await window.api.getNotesList()
-  restoreFolderState(fileList) // 恢复展开状态
+  restoreFolderState(fileList)
   notes.value = fileList
 }
 
 const openNote = async (file: FileNode): Promise<void> => {
-  if (file.type === 'folder') return // 文件夹不可阅读
+  if (file.type === 'folder') return
   activeFilePath.value = file.path
   const content = await window.api.readNote(file.path)
   if (editorRef.value) {
@@ -122,7 +114,7 @@ const openNote = async (file: FileNode): Promise<void> => {
   }
 }
 
-// ==================== 右键菜单与新建逻辑 ====================
+// ==================== 右键菜单核心逻辑 ====================
 
 const contextMenu = ref({
   show: false,
@@ -131,13 +123,23 @@ const contextMenu = ref({
   file: null as FileNode | null
 })
 
-// 显示右键菜单（接收来自子组件的事件）
+// 情况 1：右键点击了具体的节点
 const showContextMenu = (payload: { event: MouseEvent; node: FileNode }): void => {
   contextMenu.value = {
     show: true,
     x: payload.event.clientX,
     y: payload.event.clientY,
-    file: payload.node
+    file: payload.node // 记录选中的文件/文件夹
+  }
+}
+
+// 情况 2：右键点击了空白处
+const showRootContextMenu = (event: MouseEvent): void => {
+  contextMenu.value = {
+    show: true,
+    x: event.clientX,
+    y: event.clientY,
+    file: null // 设置为空，代表在根目录操作
   }
 }
 
@@ -145,29 +147,26 @@ const closeContextMenu = (): void => {
   contextMenu.value.show = false
 }
 
-// 智能获取父目录（用于判断新建文件放在哪）
 const getParentDir = (path: string): string => {
   const normalized = path.replace(/\\/g, '/')
   return normalized.substring(0, normalized.lastIndexOf('/'))
 }
 
-// 新建笔记
+// 新建操作
 const createNewNote = async (targetNode: FileNode | null): Promise<void> => {
   let targetDir: string | undefined = undefined
   if (targetNode) {
-    // 如果右键的是文件夹，就在该文件夹下建；如果是文件，就在文件同级建
     targetDir = targetNode.type === 'folder' ? targetNode.path : getParentDir(targetNode.path)
   }
   const newNote = await window.api.createNote(targetDir)
   if (newNote) {
-    if (targetDir) openedFolders.value.add(targetDir) // 自动展开父文件夹
+    if (targetDir) openedFolders.value.add(targetDir)
     await loadFiles()
     openNote(newNote)
   }
   closeContextMenu()
 }
 
-// 新建文件夹
 const createNewFolder = async (targetNode: FileNode | null): Promise<void> => {
   let targetDir: string | undefined = undefined
   if (targetNode) {
@@ -181,8 +180,7 @@ const createNewFolder = async (targetNode: FileNode | null): Promise<void> => {
   closeContextMenu()
 }
 
-// ==================== 全局重命名与删除逻辑 ====================
-
+// 重命名与删除操作
 const renamingPath = ref('')
 const renameInput = ref('')
 const renameInputRef = ref<HTMLInputElement | null>(null)
@@ -193,7 +191,6 @@ const startRename = async (): Promise<void> => {
   renameInput.value = contextMenu.value.file.name
   closeContextMenu()
 
-  // 弹出重命名框并自动聚焦
   await nextTick()
   if (renameInputRef.value) {
     renameInputRef.value.focus()
@@ -214,7 +211,6 @@ const submitRename = async (): Promise<void> => {
 
   const result = await window.api.renameFile(oldPath, newName)
   if (result.success) {
-    // 如果重命名了已展开的文件夹，更新记忆状态
     if (openedFolders.value.has(oldPath)) {
       openedFolders.value.delete(oldPath)
       openedFolders.value.add(result.newPath!)
@@ -255,8 +251,6 @@ const deleteNote = async (): Promise<void> => {
 onMounted(async () => {
   window.addEventListener('click', closeContextMenu)
   await loadFiles()
-
-  // 初始化时，如果根目录有笔记，自动打开第一篇
   if (notes.value.length > 0) {
     const firstFile = notes.value.find((n) => n.type === 'file')
     if (firstFile) openNote(firstFile)
@@ -269,7 +263,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
-/* 全局重置保持不变 */
+/* CSS 保持不变，无需修改 */
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -281,8 +275,6 @@ body {
   width: 100vw;
   overflow: hidden;
 }
-
-/* 侧边栏与头部 */
 .sidebar-files {
   width: 260px;
   background-color: #202020;
@@ -302,24 +294,7 @@ body {
   align-items: center;
   border-bottom: 1px solid #333;
 }
-.header-actions {
-  display: flex;
-  gap: 8px;
-}
-.new-btn {
-  background: transparent;
-  border: none;
-  color: #a3a3a3;
-  font-size: 15px;
-  cursor: pointer;
-  transition: color 0.2s;
-  padding: 0;
-}
-.new-btn:hover {
-  color: #fff;
-}
 
-/* 列表区 */
 .file-list {
   padding: 10px 8px;
   overflow-y: auto;
@@ -330,8 +305,6 @@ body {
   display: flex;
   min-width: 0;
 }
-
-/* 右键菜单进阶版 */
 .context-menu {
   position: fixed;
   background: #2a2a2a;
@@ -365,8 +338,6 @@ body {
   background: #444;
   margin: 4px 0;
 }
-
-/* 全局高质感重命名弹窗 */
 .rename-overlay {
   position: fixed;
   top: 0;

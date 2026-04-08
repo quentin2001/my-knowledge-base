@@ -5,11 +5,10 @@
       :class="{ 'is-active': activePath === node.path }"
       :style="{ paddingLeft: depth * 16 + 8 + 'px' }"
       @click="handleClick"
-      @contextmenu.prevent="handleContextMenu($event)"
+      @contextmenu.prevent.stop="handleContextMenu($event)"
     >
       <span v-if="node.type === 'folder'" class="icon arrow" :class="{ open: node.isOpen }">▸</span>
       <span v-else class="icon">📄</span>
-
       <span class="node-name">{{ node.name }}</span>
     </div>
 
@@ -29,7 +28,6 @@
 </template>
 
 <script setup lang="ts">
-// 【修复 1】：砍掉外部引入，直接在本地定义，解决找不到模块的报错
 interface FileNode {
   type: 'file' | 'folder'
   name: string
@@ -45,24 +43,22 @@ const props = defineProps<{
   activePath: string
 }>()
 
-// 【修复 2】：新增一个 toggle-folder 的自定义事件
 const emit = defineEmits(['open-file', 'show-context-menu', 'toggle-folder'])
 
-// 【修复 3】：加上 : void 返回值
 const handleClick = (): void => {
   if (props.node.type === 'folder') {
-    // 【修复 4】：不再直接修改 props！而是发射事件，把当前节点传出去，让最顶层的 App.vue 去改！
     emit('toggle-folder', props.node)
   } else {
     emit('open-file', props.node)
   }
 }
 
-// 【修复 5】：加上 : void 返回值
 const handleContextMenu = (event: MouseEvent): void => {
+  // 把具体的事件和节点信息抛给上层 App.vue
   emit('show-context-menu', { event, node: props.node })
 }
 </script>
+
 <style scoped>
 .node-content {
   display: flex;

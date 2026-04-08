@@ -230,17 +230,22 @@ app.whenReady().then(() => {
       return null
     }
   })
-  // --- 【新增】：重命名笔记 ---
+  // --- 【修复】：重命名笔记（区分文件和文件夹） ---
   ipcMain.handle('rename-file', async (_event, oldPath: string, newName: string) => {
     try {
-      // 获取文件所在的目录
+      // 获取文件所在的目录（利用咱们之前在顶部引入的 dirname）
       const dir = dirname(oldPath)
-      // 拼接新的文件路径 (别忘了加 .md 后缀)
-      const newPath = join(dir, `${newName}.md`)
-      // 如果新名字的文件已经存在，阻止重命名
+
+      // 【核心修复】：探查老路径到底是一个文件夹还是文件
+      const isDir = fs.statSync(oldPath).isDirectory()
+
+      // 如果是文件夹，新名字直接拼接；如果是文件，才加上 .md 小尾巴
+      const newPath = isDir ? join(dir, newName) : join(dir, `${newName}.md`)
+
       if (fs.existsSync(newPath)) {
-        return { success: false, error: '文件名已存在' }
+        return { success: false, error: '名称已存在' }
       }
+
       fs.renameSync(oldPath, newPath)
       return { success: true, newPath }
     } catch (error) {
