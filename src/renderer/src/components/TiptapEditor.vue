@@ -1,13 +1,17 @@
 <template>
   <div class="app-layout">
-    <aside class="sidebar-toc" v-show="showToc">
+    <aside v-show="showToc" class="sidebar-toc">
       <div class="toc-header">
         <span class="toc-title">📑 页面大纲</span>
-        <button class="icon-btn" @click="showToc = false" title="隐藏大纲">◂</button>
+        <button class="icon-btn" title="隐藏大纲" @click="showToc = false">◂</button>
       </div>
       <div class="toc-content">
-        <div v-for="(heading, index) in headings" :key="index" class="toc-item"
-          :style="{ paddingLeft: `${(heading.level - 1) * 16}px` }">
+        <div
+          v-for="(heading, index) in headings"
+          :key="index"
+          class="toc-item"
+          :style="{ paddingLeft: `${(heading.level - 1) * 16}px` }"
+        >
           {{ heading.text }}
         </div>
         <div v-if="headings.length === 0" class="toc-empty">暂无标题</div>
@@ -16,17 +20,21 @@
 
     <main class="main-workspace">
       <div class="status-bar">
-        <button class="text-btn" v-if="!showToc" @click="showToc = true">▸ 显示大纲</button>
-        <button class="text-btn" v-if="!showToolbar" @click="showToolbar = true">▾ 显示工具栏</button>
+        <button v-if="!showToc" class="text-btn" @click="showToc = true">▸ 显示大纲</button>
+        <button v-if="!showToolbar" class="text-btn" @click="showToolbar = true">
+          ▾ 显示工具栏
+        </button>
       </div>
 
-      <header class="top-toolbar" v-show="showToolbar">
+      <header v-show="showToolbar" class="top-toolbar">
         <div class="toolbar-group">
           <button @click="editor?.chain().focus().toggleBold().run()"><b>B</b> 加粗</button>
           <button @click="editor?.chain().focus().toggleHeading({ level: 2 }).run()">H2</button>
           <button @click="editor?.chain().focus().setColumns(2).run()">◫ 双列布局</button>
         </div>
-        <button class="icon-btn hide-toolbar-btn" @click="showToolbar = false" title="隐藏工具栏">▴</button>
+        <button class="icon-btn hide-toolbar-btn" title="隐藏工具栏" @click="showToolbar = false">
+          ▴
+        </button>
       </header>
 
       <div class="editor-container">
@@ -47,7 +55,7 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     columns: {
-      setColumns: (cols: number) => ReturnType,
+      setColumns: (cols: number) => ReturnType
     }
   }
 }
@@ -56,14 +64,17 @@ declare module '@tiptap/core' {
 import { Columns } from '../extensions/Columns'
 import { Column } from '../extensions/Column'
 
+// 【新增引入】：引入斜杠命令扩展和配置项
+import SlashCommand, { slashSuggestion } from '../extensions/slashCommand'
+
 const showToc = ref(true)
 const showToolbar = ref(true)
 
 // 定义大纲数据的严格结构
 interface HeadingItem {
-  level: number;
-  text: string;
-  pos: number;
+  level: number
+  text: string
+  pos: number
 }
 const headings: Ref<HeadingItem[]> = ref([])
 
@@ -86,15 +97,18 @@ const extractHeadings = (editorInstance: Editor): void => {
 // 初始化编辑器
 const editor = useEditor({
   content: `
-    <h1>🎉 TypeScript 零报错达成！</h1>
-    <p>恭喜你，现在的代码已经是企业级的严谨规范了。</p>
-    <h2>完美的大纲体验</h2>
-    <p>左侧的大纲已经可以精准地同步显示了。</p>
+    <h1>🎉 Notion 级体验来了！</h1>
+    <p>在这个空行敲击键盘上的 / 键试试看！</p>
+    <p></p>
   `,
   extensions: [
     StarterKit,
-    Columns, // 注册外层多列布局组件
-    Column   // 注册内层单列组件
+    Columns,
+    Column,
+    // 【新增注册】：将斜杠命令和它的配置注入到编辑器中！
+    SlashCommand.configure({
+      suggestion: slashSuggestion
+    })
   ],
   // 确保传入的回调参数类型正确
   onUpdate: ({ editor }) => extractHeadings(editor as Editor),
