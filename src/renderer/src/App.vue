@@ -22,6 +22,7 @@
             @show-context-menu="showContextMenu"
             @toggle-folder="handleToggleFolder"
             @drag-event="handleDragEvent"
+            @native-drop="handleNativeDrop"
           />
         </template>
       </draggable>
@@ -65,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, onBeforeUnmount } from 'vue'
+import { ref, onMounted, nextTick, onBeforeUnmount, provide } from 'vue'
 import draggable from 'vuedraggable' // 【新增引入】
 import TiptapEditor from './components/TiptapEditor.vue'
 import FileTreeNode from './components/FileTreeNode.vue'
@@ -93,7 +94,11 @@ const notes = ref<FileNode[]>([])
 const activeFilePath = ref<string>('')
 const editorRef = ref<EditorComponent | null>(null)
 const openedFolders = ref<Set<string>>(new Set())
-const rootWorkspacePath = ref<string>('') // 记录根目录的绝对路径
+const rootWorkspacePath = ref<string>('')
+
+// 【新增核心魔法】：创建一个全局共享的“幽灵变量”，记住你按下了谁
+const globalDraggedNode = ref<FileNode | null>(null)
+provide('globalDraggedNode', globalDraggedNode)
 
 const getParentDir = (path: string): string => {
   const normalized = path.replace(/\\/g, '/')
@@ -171,6 +176,30 @@ const handleDragEvent = async (payload: {
 // 【修复】：将 evt: any 改为 evt: DragChangeEvent
 const onRootDragChange = (evt: DragChangeEvent): void => {
   handleDragEvent({ evt, parentPath: rootWorkspacePath.value, children: notes.value })
+}
+
+// 【新增】：处理鼠标直接松开在文件夹名字上的“物理空投”
+const handleNativeDrop = async (payload: {
+  draggedNode: FileNode
+  targetFolder: FileNode
+}): Promise<void> => {
+  const { draggedNode, targetFolder } = payload
+
+  // 呼叫后端直接把文件移动过去
+  const result = await window.api.moveNode(draggedNode.path, targetFolder.path)
+
+  if (result.success) {
+    // 极其丝滑的体验：把文件扔进去后，自动帮你展开这个文件夹！
+    openedFolders.value.add(targetFolder.path)
+    await loadFiles() // 刷新列表
+
+    // 如果你正开着这个文件，更新一下它的路径，防止报错
+    if (activeFilePath.value === draggedNode.path) {
+      activeFilePath.value = result.newPath!
+    }
+  } else {
+    alert(result.error)
+  }
 }
 
 // ==================== 右键菜单核心逻辑 ====================
