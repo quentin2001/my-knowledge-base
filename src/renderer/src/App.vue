@@ -5,18 +5,26 @@
         <span>📚 我的知识库</span>
       </div>
 
-      <div class="file-list">
-        <FileTreeNode
-          v-for="node in notes"
-          :key="node.path"
-          :node="node"
-          :depth="0"
-          :active-path="activeFilePath"
-          @open-file="openNote"
-          @show-context-menu="showContextMenu"
-          @toggle-folder="handleToggleFolder"
-        />
-      </div>
+      <draggable
+        class="file-list"
+        :list="notes"
+        group="files"
+        item-key="path"
+        :animation="200"
+        @change="onRootDragChange"
+      >
+        <template #item="{ element }">
+          <FileTreeNode
+            :node="element"
+            :depth="0"
+            :active-path="activeFilePath"
+            @open-file="openNote"
+            @show-context-menu="showContextMenu"
+            @toggle-folder="handleToggleFolder"
+            @drag-event="handleDragEvent"
+          />
+        </template>
+      </draggable>
     </aside>
 
     <div
@@ -26,7 +34,6 @@
     >
       <div class="menu-item" @click="createNewNote(contextMenu.file)">📄 新建笔记</div>
       <div class="menu-item" @click="createNewFolder(contextMenu.file)">📁 新建文件夹</div>
-
       <template v-if="contextMenu.file !== null">
         <div class="divider"></div>
         <div class="menu-item" @click="startRename">✏️ 重命名</div>
@@ -59,6 +66,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick, onBeforeUnmount } from 'vue'
+import draggable from 'vuedraggable' // 【新增引入】
 import TiptapEditor from './components/TiptapEditor.vue'
 import FileTreeNode from './components/FileTreeNode.vue'
 
@@ -70,24 +78,32 @@ interface FileNode {
   isOpen?: boolean
   children?: FileNode[]
 }
-
 interface EditorComponent {
   loadContent: (content: string) => void
+}
+
+// 【新增】：在这里也加上拖拽事件的严谨类型
+interface DragChangeEvent {
+  added?: { element: FileNode; newIndex: number }
+  removed?: { element: FileNode; oldIndex: number }
+  moved?: { element: FileNode; oldIndex: number; newIndex: number }
 }
 
 const notes = ref<FileNode[]>([])
 const activeFilePath = ref<string>('')
 const editorRef = ref<EditorComponent | null>(null)
 const openedFolders = ref<Set<string>>(new Set())
+const rootWorkspacePath = ref<string>('') // 记录根目录的绝对路径
 
-// 文件树操作逻辑
+const getParentDir = (path: string): string => {
+  const normalized = path.replace(/\\/g, '/')
+  return normalized.substring(0, normalized.lastIndexOf('/'))
+}
+
 const handleToggleFolder = (node: FileNode): void => {
   node.isOpen = !node.isOpen
-  if (node.isOpen) {
-    openedFolders.value.add(node.path)
-  } else {
-    openedFolders.value.delete(node.path)
-  }
+  if (node.isOpen) openedFolders.value.add(node.path)
+  else openedFolders.value.delete(node.path)
 }
 
 const restoreFolderState = (nodes: FileNode[]): void => {
@@ -103,61 +119,83 @@ const loadFiles = async (): Promise<void> => {
   const fileList = await window.api.getNotesList()
   restoreFolderState(fileList)
   notes.value = fileList
+  // 巧妙地获取底层的根目录路径
+  if (fileList.length > 0 && !rootWorkspacePath.value) {
+    rootWorkspacePath.value = getParentDir(fileList[0].path)
+  }
 }
 
 const openNote = async (file: FileNode): Promise<void> => {
   if (file.type === 'folder') return
   activeFilePath.value = file.path
   const content = await window.api.readNote(file.path)
-  if (editorRef.value) {
-    editorRef.value.loadContent(content)
+  if (editorRef.value) editorRef.value.loadContent(content)
+}
+
+// ==================== 拖拽排序核心逻辑 ====================
+
+// 【修复】：将 evt: any 改为 evt: DragChangeEvent
+const handleDragEvent = async (payload: {
+  evt: DragChangeEvent
+  parentPath: string
+  children: FileNode[]
+}): Promise<void> => {
+  const { evt, parentPath, children } = payload
+  if (!parentPath) return
+
+  // 1. 同级排序（顺序改变了）
+  if (evt.moved) {
+    const order = children.map((c) => c.fileName || '')
+    await window.api.updateSortOrder(parentPath, order)
+  }
+
+  // 2. 跨文件夹移动（把外面文件拖进来了）
+  if (evt.added) {
+    const movedNode = evt.added.element
+    const result = await window.api.moveNode(movedNode.path, parentPath)
+    if (result.success) {
+      // 物理移动成功后，保存新文件夹里的排序
+      const order = children.map((c) => c.fileName || '')
+      await window.api.updateSortOrder(parentPath, order)
+
+      // 重新加载彻底刷新路径，并恢复选中状态
+      await loadFiles()
+      if (activeFilePath.value === movedNode.path) activeFilePath.value = result.newPath!
+    } else {
+      alert(result.error)
+      await loadFiles() // 移动失败，还原 UI
+    }
   }
 }
 
+// 【修复】：将 evt: any 改为 evt: DragChangeEvent
+const onRootDragChange = (evt: DragChangeEvent): void => {
+  handleDragEvent({ evt, parentPath: rootWorkspacePath.value, children: notes.value })
+}
+
 // ==================== 右键菜单核心逻辑 ====================
-
-const contextMenu = ref({
-  show: false,
-  x: 0,
-  y: 0,
-  file: null as FileNode | null
-})
-
-// 情况 1：右键点击了具体的节点
+const contextMenu = ref({ show: false, x: 0, y: 0, file: null as FileNode | null })
 const showContextMenu = (payload: { event: MouseEvent; node: FileNode }): void => {
   contextMenu.value = {
     show: true,
     x: payload.event.clientX,
     y: payload.event.clientY,
-    file: payload.node // 记录选中的文件/文件夹
+    file: payload.node
   }
 }
-
-// 情况 2：右键点击了空白处
 const showRootContextMenu = (event: MouseEvent): void => {
-  contextMenu.value = {
-    show: true,
-    x: event.clientX,
-    y: event.clientY,
-    file: null // 设置为空，代表在根目录操作
-  }
+  contextMenu.value = { show: true, x: event.clientX, y: event.clientY, file: null }
 }
-
 const closeContextMenu = (): void => {
   contextMenu.value.show = false
 }
 
-const getParentDir = (path: string): string => {
-  const normalized = path.replace(/\\/g, '/')
-  return normalized.substring(0, normalized.lastIndexOf('/'))
-}
-
-// 新建操作
 const createNewNote = async (targetNode: FileNode | null): Promise<void> => {
-  let targetDir: string | undefined = undefined
-  if (targetNode) {
-    targetDir = targetNode.type === 'folder' ? targetNode.path : getParentDir(targetNode.path)
-  }
+  let targetDir = targetNode
+    ? targetNode.type === 'folder'
+      ? targetNode.path
+      : getParentDir(targetNode.path)
+    : undefined
   const newNote = await window.api.createNote(targetDir)
   if (newNote) {
     if (targetDir) openedFolders.value.add(targetDir)
@@ -168,10 +206,11 @@ const createNewNote = async (targetNode: FileNode | null): Promise<void> => {
 }
 
 const createNewFolder = async (targetNode: FileNode | null): Promise<void> => {
-  let targetDir: string | undefined = undefined
-  if (targetNode) {
-    targetDir = targetNode.type === 'folder' ? targetNode.path : getParentDir(targetNode.path)
-  }
+  let targetDir = targetNode
+    ? targetNode.type === 'folder'
+      ? targetNode.path
+      : getParentDir(targetNode.path)
+    : undefined
   const newFolder = await window.api.createFolder(targetDir)
   if (newFolder) {
     if (targetDir) openedFolders.value.add(targetDir)
@@ -180,7 +219,7 @@ const createNewFolder = async (targetNode: FileNode | null): Promise<void> => {
   closeContextMenu()
 }
 
-// 重命名与删除操作
+// ==================== 重命名与删除逻辑 ====================
 const renamingPath = ref('')
 const renameInput = ref('')
 const renameInputRef = ref<HTMLInputElement | null>(null)
@@ -190,7 +229,6 @@ const startRename = async (): Promise<void> => {
   renamingPath.value = contextMenu.value.file.path
   renameInput.value = contextMenu.value.file.name
   closeContextMenu()
-
   await nextTick()
   if (renameInputRef.value) {
     renameInputRef.value.focus()
@@ -204,10 +242,7 @@ const submitRename = async (): Promise<void> => {
   const newName = renameInput.value.trim()
   const file = contextMenu.value.file
 
-  if (!newName || (file && newName === file.name)) {
-    cancelRename()
-    return
-  }
+  if (!newName || (file && newName === file.name)) return cancelRename()
 
   const result = await window.api.renameFile(oldPath, newName)
   if (result.success) {
@@ -216,9 +251,7 @@ const submitRename = async (): Promise<void> => {
       openedFolders.value.add(result.newPath!)
     }
     await loadFiles()
-    if (activeFilePath.value === oldPath) {
-      activeFilePath.value = result.newPath!
-    }
+    if (activeFilePath.value === oldPath) activeFilePath.value = result.newPath!
   } else {
     alert(result.error)
   }
@@ -234,7 +267,6 @@ const deleteNote = async (): Promise<void> => {
   const file = contextMenu.value.file
   if (!file) return
   closeContextMenu()
-
   const typeName = file.type === 'folder' ? '文件夹' : '笔记'
   if (confirm(`确定要将${typeName} "${file.name}" 放入回收站吗？`)) {
     const success = await window.api.deleteFile(file.path)
@@ -256,14 +288,12 @@ onMounted(async () => {
     if (firstFile) openNote(firstFile)
   }
 })
-
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeContextMenu)
 })
 </script>
 
 <style>
-/* CSS 保持不变，无需修改 */
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -294,7 +324,6 @@ body {
   align-items: center;
   border-bottom: 1px solid #333;
 }
-
 .file-list {
   padding: 10px 8px;
   overflow-y: auto;

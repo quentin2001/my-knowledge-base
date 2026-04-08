@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, protocol, net, dialog } from 'electron'
-import { join, dirname } from 'path'
+import { join, dirname, basename } from 'path'
 import fs from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -137,43 +137,65 @@ app.whenReady().then(() => {
     children?: FileNode[]
   }
 
-  // 【修复】：补全返回值类型 : FileNode[]
+  // --- 【升级】：支持自定义排序的构建树函数 ---
   const buildFileTree = (dirPath: string): FileNode[] => {
-    // 【修复】：把 any[] 改成 FileNode[]
     const result: FileNode[] = []
     const items = fs.readdirSync(dirPath, { withFileTypes: true })
 
     for (const item of items) {
-      // 过滤掉隐藏文件和非 md 文件
+      // 过滤掉我们自己生成的隐藏排序文件和非 md 文件
       if (item.name.startsWith('.')) continue
       if (item.isFile() && !item.name.endsWith('.md')) continue
 
       const fullPath = join(dirPath, item.name)
-
       if (item.isDirectory()) {
         result.push({
           type: 'folder',
           name: item.name,
+          fileName: item.name, // 记录真实的系统文件名，用于排序
           path: fullPath,
-          isOpen: false, // 前端用来控制折叠展开的状态
-          children: buildFileTree(fullPath) // 【核心】：递归调用自己！
+          isOpen: false,
+          children: buildFileTree(fullPath)
         })
       } else {
         result.push({
           type: 'file',
           name: item.name.replace('.md', ''),
-          fileName: item.name,
+          fileName: item.name, // 同样记录真实文件名
           path: fullPath
         })
       }
     }
-    // 默认让文件夹排在上面，文件排在下面
-    return result.sort((a, b) => {
+
+    // 【新增】：读取当前目录下的 .sort.json 记忆文件
+    const sortMetaPath = join(dirPath, '.sort.json')
+    let sortOrder: string[] = []
+    if (fs.existsSync(sortMetaPath)) {
+      try {
+        sortOrder = JSON.parse(fs.readFileSync(sortMetaPath, 'utf-8'))
+      } catch (e) {
+        // 忽略 JSON 解析错误
+        console.error('解析 .sort.json 失败:', e)
+      }
+    }
+
+    // 【新增】：根据记忆顺序进行排序
+    result.sort((a, b) => {
+      const indexA = sortOrder.indexOf(a.fileName!)
+      const indexB = sortOrder.indexOf(b.fileName!)
+
+      // 如果两个文件都在记忆列表里，按记忆顺序排
+      if (indexA !== -1 && indexB !== -1) return indexA - indexB
+      if (indexA !== -1) return -1
+      if (indexB !== -1) return 1
+
+      // 兜底策略：新创建的、没有记忆的文件，文件夹排前面，然后按字母排
       if (a.type === b.type) return a.name.localeCompare(b.name)
       return a.type === 'folder' ? -1 : 1
     })
-  }
 
+    return result
+  }
   ipcMain.handle('get-notes-list', async () => {
     try {
       return buildFileTree(workspaceDir)
@@ -285,6 +307,41 @@ app.whenReady().then(() => {
       return false
     }
   })
+
+  // --- 【新增】：保存目录的自定义排序 ---
+  ipcMain.handle('update-sort-order', async (_event, dirPath: string, order: string[]) => {
+    try {
+      const sortMetaPath = join(dirPath, '.sort.json')
+      fs.writeFileSync(sortMetaPath, JSON.stringify(order), 'utf-8')
+      return true
+    } catch (e) {
+      console.error('保存排序失败:', e)
+      return false
+    }
+  })
+
+  // --- 【新增】：跨文件夹拖拽时的物理移动 ---
+  ipcMain.handle('move-node', async (_event, oldPath: string, newDirPath: string) => {
+    try {
+      const fileName = basename(oldPath)
+      const newPath = join(newDirPath, fileName)
+
+      // 如果原地拖拽，不报错
+      if (oldPath === newPath) return { success: true, newPath }
+
+      // 防止覆盖同名文件
+      if (fs.existsSync(newPath)) {
+        return { success: false, error: '目标文件夹已存在同名文件！' }
+      }
+
+      fs.renameSync(oldPath, newPath)
+      return { success: true, newPath }
+    } catch (error) {
+      console.error('移动文件失败:', error)
+      return { success: false, error: '跨文件夹移动失败' }
+    }
+  })
+
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
 

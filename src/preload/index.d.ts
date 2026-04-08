@@ -25,6 +25,11 @@ declare global {
         oldPath: string,
         newName: string
       ) => Promise<{ success: boolean; newPath?: string; error?: string }>
+      updateSortOrder: (dirPath: string, order: string[]) => Promise<boolean>
+      moveNode: (
+        oldPath: string,
+        newDirPath: string
+      ) => Promise<{ success: boolean; newPath?: string; error?: string }>
       deleteFile: (targetPath: string) => Promise<boolean>
     }
   }

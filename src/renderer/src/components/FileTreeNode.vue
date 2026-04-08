@@ -12,22 +12,33 @@
       <span class="node-name">{{ node.name }}</span>
     </div>
 
-    <div v-if="node.type === 'folder' && node.isOpen" class="node-children">
-      <FileTreeNode
-        v-for="child in node.children"
-        :key="child.path"
-        :node="child"
-        :depth="depth + 1"
-        :active-path="activePath"
-        @open-file="$emit('open-file', $event)"
-        @show-context-menu="$emit('show-context-menu', $event)"
-        @toggle-folder="$emit('toggle-folder', $event)"
-      />
-    </div>
+    <draggable
+      v-if="node.type === 'folder' && node.isOpen"
+      class="node-children"
+      :list="node.children"
+      group="files"
+      item-key="path"
+      :animation="200"
+      @change="onDragChange"
+    >
+      <template #item="{ element }">
+        <FileTreeNode
+          :node="element"
+          :depth="depth + 1"
+          :active-path="activePath"
+          @open-file="$emit('open-file', $event)"
+          @show-context-menu="$emit('show-context-menu', $event)"
+          @toggle-folder="$emit('toggle-folder', $event)"
+          @drag-event="$emit('drag-event', $event)"
+        />
+      </template>
+    </draggable>
   </div>
 </template>
 
 <script setup lang="ts">
+import draggable from 'vuedraggable' // 【新增引入】
+
 interface FileNode {
   type: 'file' | 'folder'
   name: string
@@ -37,13 +48,20 @@ interface FileNode {
   children?: FileNode[]
 }
 
+// 【新增】：严格定义拖拽事件的类型，彻底抛弃 any
+interface DragChangeEvent {
+  added?: { element: FileNode; newIndex: number }
+  removed?: { element: FileNode; oldIndex: number }
+  moved?: { element: FileNode; oldIndex: number; newIndex: number }
+}
+
 const props = defineProps<{
   node: FileNode
   depth: number
   activePath: string
 }>()
 
-const emit = defineEmits(['open-file', 'show-context-menu', 'toggle-folder'])
+const emit = defineEmits(['open-file', 'show-context-menu', 'toggle-folder', 'drag-event'])
 
 const handleClick = (): void => {
   if (props.node.type === 'folder') {
@@ -54,8 +72,12 @@ const handleClick = (): void => {
 }
 
 const handleContextMenu = (event: MouseEvent): void => {
-  // 把具体的事件和节点信息抛给上层 App.vue
   emit('show-context-menu', { event, node: props.node })
+}
+
+// 【修复】：用 DragChangeEvent 替换掉 any
+const onDragChange = (evt: DragChangeEvent): void => {
+  emit('drag-event', { evt, parentPath: props.node.path, children: props.node.children })
 }
 </script>
 

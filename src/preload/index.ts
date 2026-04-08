@@ -18,7 +18,11 @@ const api = {
   // 【新增】：暴露重命名和删除方法
   renameFile: (oldPath: string, newName: string) =>
     ipcRenderer.invoke('rename-file', oldPath, newName),
-  deleteFile: (targetPath: string) => ipcRenderer.invoke('delete-file', targetPath)
+  deleteFile: (targetPath: string) => ipcRenderer.invoke('delete-file', targetPath),
+  updateSortOrder: (dirPath: string, order: string[]) =>
+    ipcRenderer.invoke('update-sort-order', dirPath, order),
+  moveNode: (oldPath: string, newDirPath: string) =>
+    ipcRenderer.invoke('move-node', oldPath, newDirPath)
 }
 
 if (process.contextIsolated) {
