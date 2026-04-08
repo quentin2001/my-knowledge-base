@@ -1,10 +1,17 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
-// 自定义我们要暴露给 Vue 的 API
+// Custom APIs for renderer
 const api = {
-  // 新增保存图片的桥梁方法
-  saveImage: (arrayBuffer, fileName) => ipcRenderer.invoke('save-image', arrayBuffer, fileName)
+  // 原有的保存图片
+  saveImage: (buffer: ArrayBuffer, fileName: string) =>
+    ipcRenderer.invoke('save-image', buffer, fileName),
+
+  // 【新增】：文件管理 API
+  getNotesList: () => ipcRenderer.invoke('get-notes-list'),
+  readNote: (filePath: string) => ipcRenderer.invoke('read-note', filePath),
+  saveNote: (filePath: string, content: string) =>
+    ipcRenderer.invoke('save-note', filePath, content)
 }
 
 if (process.contextIsolated) {

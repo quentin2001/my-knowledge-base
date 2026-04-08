@@ -113,6 +113,59 @@ app.whenReady().then(() => {
     return null // 用户取消了操作
   })
 
+  // ==================== 文件系统管理 ====================
+  // 定义你的专属笔记根目录：文档/MyKnowledgeBase/Notes
+  const workspaceDir = join(app.getPath('documents'), 'MyKnowledgeBase', 'Notes')
+
+  // 确保根目录存在
+  if (!fs.existsSync(workspaceDir)) {
+    fs.mkdirSync(workspaceDir, { recursive: true })
+    // 顺手给用户创建一个欢迎文件
+    fs.writeFileSync(
+      join(workspaceDir, '欢迎使用.md'),
+      '# 🎉 欢迎来到你的专属知识库！\n在这里写下你的第一篇笔记吧。',
+      'utf-8'
+    )
+  }
+
+  // 1. 获取文件列表 (目前先做单层目录，后续我们再升级成无限嵌套的树形结构)
+  ipcMain.handle('get-notes-list', async () => {
+    try {
+      const files = fs.readdirSync(workspaceDir)
+      // 只返回 .md 文件，并附带绝对路径
+      return files
+        .filter((file) => file.endsWith('.md'))
+        .map((file) => ({
+          name: file.replace('.md', ''), // 隐藏后缀名好看一点
+          fileName: file,
+          path: join(workspaceDir, file)
+        }))
+    } catch (error) {
+      console.error('读取目录失败:', error)
+      return []
+    }
+  })
+
+  // 2. 读取单个笔记内容
+  ipcMain.handle('read-note', async (_event, filePath: string) => {
+    try {
+      return fs.readFileSync(filePath, 'utf-8')
+    } catch (error) {
+      console.error('读取笔记失败:', error)
+      return ''
+    }
+  })
+
+  // 3. 保存单个笔记内容 (用于后续的自动保存)
+  ipcMain.handle('save-note', async (_event, filePath: string, content: string) => {
+    try {
+      fs.writeFileSync(filePath, content, 'utf-8')
+      return true
+    } catch (error) {
+      console.error('保存笔记失败:', error)
+      return false
+    }
+  })
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
 
