@@ -16,6 +16,8 @@ declare global {
       getNotesList: () => Promise<NoteFile[]>
       readNote: (filePath: string) => Promise<string>
       saveNote: (filePath: string, content: string) => Promise<boolean>
+      // 【新增】它会返回我们定义好的 NoteFile 对象，或者失败时返回 null
+      createNote: () => Promise<NoteFile | null>
     }
   }
 }

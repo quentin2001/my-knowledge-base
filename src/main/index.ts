@@ -145,7 +145,36 @@ app.whenReady().then(() => {
       return []
     }
   })
+  // --- 【新增】：新建笔记 ---
+  ipcMain.handle('create-note', async () => {
+    try {
+      const baseName = '未命名笔记'
+      let fileName = `${baseName}.md`
+      let filePath = join(workspaceDir, fileName)
+      let counter = 1
 
+      // 智能重名检测：如果"未命名笔记.md"存在，就自动变成"未命名笔记 1.md"
+      while (fs.existsSync(filePath)) {
+        fileName = `${baseName} ${counter}.md`
+        filePath = join(workspaceDir, fileName)
+        counter++
+      }
+
+      // 创建一个自带一级标题的空文件
+      const initialContent = `# ${fileName.replace('.md', '')}\n\n`
+      fs.writeFileSync(filePath, initialContent, 'utf-8')
+
+      // 把新文件的数据返回给前端
+      return {
+        name: fileName.replace('.md', ''),
+        fileName: fileName,
+        path: filePath
+      }
+    } catch (error) {
+      console.error('新建笔记失败:', error)
+      return null
+    }
+  })
   // 2. 读取单个笔记内容
   ipcMain.handle('read-note', async (_event, filePath: string) => {
     try {

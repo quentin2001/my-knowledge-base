@@ -229,18 +229,7 @@ const CustomImage = Image.extend({
 
 // 初始化编辑器
 const editor = useEditor({
-  content: `
-    <h1>双向联动测试</h1>
-    <p>向下滚动或者复制粘贴很多文本，产生滚动条来测试！</p>
-    <h2>第一章：基础</h2>
-    <p>这里是一些内容...</p><br><br><br><br><br>
-    <h2>第二章：进阶</h2>
-    <p>尝试在左边点击我！</p><br><br><br><br><br>
-    <h3>2.1 小节</h3>
-    <p>继续向下...</p><br><br><br><br><br>
-    <h2>第三章：终章</h2>
-    <p>当你滚动到这里，左侧大纲的“第三章”应该会高亮。</p><br><br><br><br><br>
-  `,
+  content: `开始书写`,
   extensions: [
     StarterKit,
     Columns,

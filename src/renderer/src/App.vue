@@ -1,7 +1,10 @@
 <template>
   <div class="app-container">
     <aside class="sidebar-files">
-      <div class="sidebar-header">📚 我的知识库</div>
+      <div class="sidebar-header">
+        <span>📚 我的知识库</span>
+        <button class="new-note-btn" title="新建笔记" @click="createNewNote">＋</button>
+      </div>
       <div class="file-list">
         <div v-for="file in notes" :key="file.path" class="file-item" @click="openNote(file)">
           📄 {{ file.name }}
@@ -39,6 +42,17 @@ const loadFiles = async (): Promise<void> => {
   notes.value = fileList
 }
 
+// 【新增】：新建笔记逻辑
+const createNewNote = async (): Promise<void> => {
+  const newNote = await window.api.createNote()
+  if (newNote) {
+    // 1. 将新文件加到左侧列表里
+    notes.value.push(newNote)
+    // 2. 自动选中并打开它
+    openNote(newNote)
+  }
+}
+
 // 【修复 3】：同样加上 : Promise<void>
 const openNote = async (file: NoteFile): Promise<void> => {
   console.log('准备打开文件:', file.name)
@@ -74,14 +88,34 @@ body {
   border-right: 1px solid #111;
 }
 
+/* 修改原有的 sidebar-header */
 .sidebar-header {
   padding: 16px;
   font-size: 13px;
   font-weight: bold;
   color: #fff;
   letter-spacing: 1px;
-  text-transform: uppercase;
+  /* 变成 flex 布局，让文字和按钮分别靠左右两边 */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   border-bottom: 1px solid #333;
+}
+
+/* 新增的加号按钮样式 */
+.new-note-btn {
+  background: transparent;
+  border: none;
+  color: #a3a3a3;
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+  transition: color 0.2s;
+}
+
+.new-note-btn:hover {
+  color: #fff; /* 鼠标悬停时亮起 */
 }
 
 .file-list {

@@ -11,7 +11,9 @@ const api = {
   getNotesList: () => ipcRenderer.invoke('get-notes-list'),
   readNote: (filePath: string) => ipcRenderer.invoke('read-note', filePath),
   saveNote: (filePath: string, content: string) =>
-    ipcRenderer.invoke('save-note', filePath, content)
+    ipcRenderer.invoke('save-note', filePath, content),
+  // 【新增】暴露新建方法
+  createNote: () => ipcRenderer.invoke('create-note')
 }
 
 if (process.contextIsolated) {
