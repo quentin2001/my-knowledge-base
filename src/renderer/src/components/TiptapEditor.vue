@@ -286,6 +286,18 @@ onBeforeUnmount(() => {
     editor.value.destroy()
   }
 })
+// ==================== 暴露给父组件的方法 ====================
+const loadContent = (newContent: string): void => {
+  if (editor.value) {
+    // 使用 Tiptap 的 setContent 命令强制替换当前编辑器里的所有内容
+    editor.value.commands.setContent(newContent)
+  }
+}
+
+// 使用 defineExpose 让父组件 (App.vue) 可以直接调用这个函数
+defineExpose({
+  loadContent
+})
 </script>
 
 <style scoped>
