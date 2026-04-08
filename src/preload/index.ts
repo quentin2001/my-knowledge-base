@@ -13,7 +13,8 @@ const api = {
   saveNote: (filePath: string, content: string) =>
     ipcRenderer.invoke('save-note', filePath, content),
   // 【新增】暴露新建方法
-  createNote: () => ipcRenderer.invoke('create-note'),
+  createNote: (targetDir?: string) => ipcRenderer.invoke('create-note', targetDir),
+  createFolder: (targetDir?: string) => ipcRenderer.invoke('create-folder', targetDir),
   // 【新增】：暴露重命名和删除方法
   renameFile: (oldPath: string, newName: string) =>
     ipcRenderer.invoke('rename-file', oldPath, newName),

@@ -1,10 +1,13 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 
-// 定义一下文件条目的类型
-export interface NoteFile {
+// 【升级】：支持文件夹和文件的树形结构
+export interface FileNode {
+  type: 'file' | 'folder'
   name: string
-  fileName: string
   path: string
+  fileName?: string
+  isOpen?: boolean
+  children?: FileNode[]
 }
 
 declare global {
@@ -13,11 +16,11 @@ declare global {
     api: {
       saveImage: (buffer: ArrayBuffer, fileName: string) => Promise<string | null>
       // 【新增】
-      getNotesList: () => Promise<NoteFile[]>
+      getNotesList: () => Promise<FileNode[]> // 改为 FileNode[]
+      createNote: (targetDir?: string) => Promise<FileNode | null> // 加上可选参数
+      createFolder: (targetDir?: string) => Promise<FileNode | null> // 新增
       readNote: (filePath: string) => Promise<string>
       saveNote: (filePath: string, content: string) => Promise<boolean>
-      // 【新增】它会返回我们定义好的 NoteFile 对象，或者失败时返回 null
-      createNote: () => Promise<NoteFile | null>
       renameFile: (
         oldPath: string,
         newName: string

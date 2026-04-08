@@ -127,51 +127,106 @@ app.whenReady().then(() => {
       'utf-8'
     )
   }
+  // 【新增】：在主进程也定义好这个严谨的接口，消灭 any
+  interface FileNode {
+    type: 'file' | 'folder'
+    name: string
+    path: string
+    fileName?: string
+    isOpen?: boolean
+    children?: FileNode[]
+  }
 
-  // 1. 获取文件列表 (目前先做单层目录，后续我们再升级成无限嵌套的树形结构)
+  // 【修复】：补全返回值类型 : FileNode[]
+  const buildFileTree = (dirPath: string): FileNode[] => {
+    // 【修复】：把 any[] 改成 FileNode[]
+    const result: FileNode[] = []
+    const items = fs.readdirSync(dirPath, { withFileTypes: true })
+
+    for (const item of items) {
+      // 过滤掉隐藏文件和非 md 文件
+      if (item.name.startsWith('.')) continue
+      if (item.isFile() && !item.name.endsWith('.md')) continue
+
+      const fullPath = join(dirPath, item.name)
+
+      if (item.isDirectory()) {
+        result.push({
+          type: 'folder',
+          name: item.name,
+          path: fullPath,
+          isOpen: false, // 前端用来控制折叠展开的状态
+          children: buildFileTree(fullPath) // 【核心】：递归调用自己！
+        })
+      } else {
+        result.push({
+          type: 'file',
+          name: item.name.replace('.md', ''),
+          fileName: item.name,
+          path: fullPath
+        })
+      }
+    }
+    // 默认让文件夹排在上面，文件排在下面
+    return result.sort((a, b) => {
+      if (a.type === b.type) return a.name.localeCompare(b.name)
+      return a.type === 'folder' ? -1 : 1
+    })
+  }
+
   ipcMain.handle('get-notes-list', async () => {
     try {
-      const files = fs.readdirSync(workspaceDir)
-      // 只返回 .md 文件，并附带绝对路径
-      return files
-        .filter((file) => file.endsWith('.md'))
-        .map((file) => ({
-          name: file.replace('.md', ''), // 隐藏后缀名好看一点
-          fileName: file,
-          path: join(workspaceDir, file)
-        }))
+      return buildFileTree(workspaceDir)
     } catch (error) {
-      console.error('读取目录失败:', error)
+      console.error('读取目录树失败:', error)
       return []
     }
   })
   // --- 【新增】：新建笔记 ---
-  ipcMain.handle('create-note', async () => {
+  // --- 【修改】：在指定目录下新建笔记 ---
+  // 接收一个 targetDir 参数，如果没传，就默认在根目录(workspaceDir)创建
+  ipcMain.handle('create-note', async (_event, targetDir?: string) => {
     try {
+      const parentDir = targetDir || workspaceDir
       const baseName = '未命名笔记'
       let fileName = `${baseName}.md`
-      let filePath = join(workspaceDir, fileName)
+      let filePath = join(parentDir, fileName)
       let counter = 1
 
-      // 智能重名检测：如果"未命名笔记.md"存在，就自动变成"未命名笔记 1.md"
       while (fs.existsSync(filePath)) {
         fileName = `${baseName} ${counter}.md`
-        filePath = join(workspaceDir, fileName)
+        filePath = join(parentDir, fileName)
         counter++
       }
 
-      // 创建一个自带一级标题的空文件
       const initialContent = `# ${fileName.replace('.md', '')}\n\n`
       fs.writeFileSync(filePath, initialContent, 'utf-8')
 
-      // 把新文件的数据返回给前端
-      return {
-        name: fileName.replace('.md', ''),
-        fileName: fileName,
-        path: filePath
-      }
+      return { type: 'file', name: fileName.replace('.md', ''), fileName, path: filePath }
     } catch (error) {
       console.error('新建笔记失败:', error)
+      return null
+    }
+  })
+
+  // --- 【新增】：在指定目录下新建文件夹 ---
+  ipcMain.handle('create-folder', async (_event, targetDir?: string) => {
+    try {
+      const parentDir = targetDir || workspaceDir
+      let folderName = '新建文件夹'
+      let folderPath = join(parentDir, folderName)
+      let counter = 1
+
+      while (fs.existsSync(folderPath)) {
+        folderName = `新建文件夹 ${counter}`
+        folderPath = join(parentDir, folderName)
+        counter++
+      }
+
+      fs.mkdirSync(folderPath)
+      return { type: 'folder', name: folderName, path: folderPath, isOpen: true, children: [] }
+    } catch (error) {
+      console.error('新建文件夹失败:', error)
       return null
     }
   })
