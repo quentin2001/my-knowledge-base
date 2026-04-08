@@ -1,8 +1,6 @@
-import { app, BrowserWindow, shell, ipcMain } from 'electron' // 确保 ipcMain 被引入
+import { app, shell, BrowserWindow, ipcMain, protocol, net, dialog } from 'electron'
 import { join } from 'path'
 import fs from 'fs'
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
@@ -44,8 +42,18 @@ function createWindow(): void {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  // --- 【新增核心逻辑】：注册自定义协议 local:// ---
+  // 绕过 Electron 的物理限制，安全地将本地图片转换给前端
+  // --- 【修复】：直接无缝转换为标准的 file 协议 ---
+  protocol.handle('local', (request) => {
+    // 此时的 request.url 已经是安全的 local:///C:/...
+    // 我们直接把它替换成系统底层完美支持的 file:/// 即可！
+    const fileUrl = request.url.replace('local://', 'file://')
+    return net.fetch(fileUrl)
+  })
+
   // 1. 注册保存图片的 IPC 通道
-  ipcMain.handle('save-image', async (event, arrayBuffer, fileName) => {
+  ipcMain.handle('save-image', async (_event, arrayBuffer, fileName) => {
     try {
       // 【重点】这里我们先临时写死一个你电脑上的测试目录，比如文档下的 MyKnowledgeBase
       // 等我们下一步做“打开/保存 md 文件”功能时，再把这里换成动态的当前笔记目录
@@ -63,13 +71,48 @@ app.whenReady().then(() => {
       const buffer = Buffer.from(arrayBuffer)
       fs.writeFileSync(filePath, buffer)
 
-      // 返回一个本地可以访问的绝对路径给前端显示（添加 file:// 协议）
-      return `file://${filePath.replace(/\\/g, '/')}`
+      // 【关键修复】：这里不要返回 file:// 了，返回我们刚才注册的 local:// 协议！
+      return `local:///${filePath.replace(/\\/g, '/')}`
     } catch (error) {
       console.error('保存图片失败:', error)
       return null
     }
   })
+
+  // --- 【新增】：导出 Markdown 文件 ---
+  ipcMain.handle('export-md', async (_event, markdownContent: string) => {
+    // 唤起系统的“另存为”弹窗
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: '导出为 Markdown',
+      defaultPath: '未命名笔记.md',
+      filters: [{ name: 'Markdown 文件', extensions: ['md'] }]
+    })
+
+    if (!canceled && filePath) {
+      // 写入文件
+      fs.writeFileSync(filePath, markdownContent, 'utf-8')
+      return true // 导出成功
+    }
+    return false // 用户取消了操作
+  })
+
+  // --- 【新增】：导入 Markdown 文件 ---
+  ipcMain.handle('import-md', async () => {
+    // 唤起系统的“选择文件”弹窗
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: '导入 Markdown',
+      properties: ['openFile'],
+      filters: [{ name: 'Markdown 文件', extensions: ['md'] }]
+    })
+
+    if (!canceled && filePaths.length > 0) {
+      // 读取文件内容并返回给前端
+      const content = fs.readFileSync(filePaths[0], 'utf-8')
+      return content
+    }
+    return null // 用户取消了操作
+  })
+
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
 
