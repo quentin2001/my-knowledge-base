@@ -1,17 +1,14 @@
 <template>
   <div class="app-layout">
-    <aside v-show="showToc" class="sidebar-toc">
+    <aside class="sidebar-toc" v-show="showToc">
       <div class="toc-header">
         <span class="toc-title">📑 页面大纲</span>
-        <button class="icon-btn" title="隐藏大纲" @click="showToc = false">◂</button>
+        <button class="icon-btn" @click="showToc = false" title="隐藏大纲">◂</button>
       </div>
       <div class="toc-content">
-        <div
-          v-for="(heading, index) in headings"
-          :key="index"
-          class="toc-item"
-          :style="{ paddingLeft: `${(heading.level - 1) * 16}px` }"
-        >
+        <div v-for="(heading, index) in headings" :key="index" class="toc-item"
+          :class="{ 'is-active': index === activeHeadingIndex }"
+          :style="{ paddingLeft: `${(heading.level - 1) * 16}px` }" @click="scrollToHeading(heading.pos, index)">
           {{ heading.text }}
         </div>
         <div v-if="headings.length === 0" class="toc-empty">暂无标题</div>
@@ -20,24 +17,20 @@
 
     <main class="main-workspace">
       <div class="status-bar">
-        <button v-if="!showToc" class="text-btn" @click="showToc = true">▸ 显示大纲</button>
-        <button v-if="!showToolbar" class="text-btn" @click="showToolbar = true">
-          ▾ 显示工具栏
-        </button>
+        <button class="text-btn" v-if="!showToc" @click="showToc = true">▸ 显示大纲</button>
+        <button class="text-btn" v-if="!showToolbar" @click="showToolbar = true">▾ 显示工具栏</button>
       </div>
 
-      <header v-show="showToolbar" class="top-toolbar">
+      <header class="top-toolbar" v-show="showToolbar">
         <div class="toolbar-group">
           <button @click="editor?.chain().focus().toggleBold().run()"><b>B</b> 加粗</button>
           <button @click="editor?.chain().focus().toggleHeading({ level: 2 }).run()">H2</button>
           <button @click="editor?.chain().focus().setColumns(2).run()">◫ 双列布局</button>
         </div>
-        <button class="icon-btn hide-toolbar-btn" title="隐藏工具栏" @click="showToolbar = false">
-          ▴
-        </button>
+        <button class="icon-btn hide-toolbar-btn" @click="showToolbar = false" title="隐藏工具栏">▴</button>
       </header>
 
-      <div class="editor-container">
+      <div class="editor-container" ref="editorContainerRef" @scroll="handleEditorScroll">
         <EditorContent :editor="editor" class="editor-content" />
       </div>
     </main>
@@ -48,37 +41,82 @@
 import { ref, onBeforeUnmount, Ref } from 'vue'
 import { useEditor, EditorContent, Editor } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
-// 引入 Tiptap 底层 ProseMirror 的标准 Node 类型
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 
-// 【TypeScript 模块扩展】：明确告诉 TS 编译器我们自定义的 setColumns 命令
+// 模块扩展声明
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
-    columns: {
-      setColumns: (cols: number) => ReturnType
-    }
+    columns: { setColumns: (cols: number) => ReturnType }
   }
 }
 
-// 引入我们的自定义分栏扩展 (确保这两个文件在你的项目目录中存在)
+// 引入我们的扩展
 import { Columns } from '../extensions/Columns'
 import { Column } from '../extensions/Column'
-
-// 【新增引入】：引入斜杠命令扩展和配置项
 import SlashCommand, { slashSuggestion } from '../extensions/slashCommand'
 
 const showToc = ref(true)
 const showToolbar = ref(true)
 
-// 定义大纲数据的严格结构
 interface HeadingItem {
-  level: number
-  text: string
-  pos: number
+  level: number;
+  text: string;
+  pos: number;
 }
 const headings: Ref<HeadingItem[]> = ref([])
 
-// 提取大纲的函数（使用严格的 TypeScript 类型）
+// --- 新增：双向联动核心状态 ---
+const activeHeadingIndex = ref(0)
+const editorContainerRef = ref<HTMLElement | null>(null)
+// 一个标志位，防止点击大纲滚动时触发滚动监听导致高亮闪烁
+let isClickScrolling = false
+
+// --- 新增：点击大纲平滑跳转 ---
+const scrollToHeading = (pos: number, index: number): void => {
+  if (!editor.value) return
+
+  activeHeadingIndex.value = index
+  isClickScrolling = true
+
+  // 通过 Tiptap 的 pos 找到真实的 DOM 节点
+  const dom = editor.value.view.nodeDOM(pos) as HTMLElement
+  if (dom) {
+    dom.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  // 给平滑滚动留一点时间，之后再恢复滚动监听
+  setTimeout(() => {
+    isClickScrolling = false
+  }, 800)
+}
+
+// --- 新增：滚动正文时自动高亮大纲 ---
+const handleEditorScroll = (): void => {
+  if (!editor.value || !editorContainerRef.value || isClickScrolling || headings.value.length === 0) return
+
+  const containerTop = editorContainerRef.value.getBoundingClientRect().top
+  let currentActiveIndex = 0
+
+  // 遍历大纲，找出距离容器顶部最近的那个标题
+  for (let i = 0; i < headings.value.length; i++) {
+    const dom = editor.value.view.nodeDOM(headings.value[i].pos) as HTMLElement
+    if (dom) {
+      const rect = dom.getBoundingClientRect()
+      // 100 是一个视觉偏移量，表示标题滚动到距离顶部 100px 以内就算激活
+      if (rect.top - containerTop < 100) {
+        currentActiveIndex = i
+      } else {
+        break // 因为标题是按顺序的，找到第一个不在判定区内的直接退出循环提高性能
+      }
+    }
+  }
+
+  if (activeHeadingIndex.value !== currentActiveIndex) {
+    activeHeadingIndex.value = currentActiveIndex
+  }
+}
+
+// 提取大纲函数
 const extractHeadings = (editorInstance: Editor): void => {
   const extractedHeadings: HeadingItem[] = []
 
@@ -97,22 +135,32 @@ const extractHeadings = (editorInstance: Editor): void => {
 // 初始化编辑器
 const editor = useEditor({
   content: `
-    <h1>🎉 Notion 级体验来了！</h1>
-    <p>在这个空行敲击键盘上的 / 键试试看！</p>
-    <p></p>
+    <h1>双向联动测试</h1>
+    <p>向下滚动或者复制粘贴很多文本，产生滚动条来测试！</p>
+    <h2>第一章：基础</h2>
+    <p>这里是一些内容...</p><br><br><br><br><br>
+    <h2>第二章：进阶</h2>
+    <p>尝试在左边点击我！</p><br><br><br><br><br>
+    <h3>2.1 小节</h3>
+    <p>继续向下...</p><br><br><br><br><br>
+    <h2>第三章：终章</h2>
+    <p>当你滚动到这里，左侧大纲的“第三章”应该会高亮。</p><br><br><br><br><br>
   `,
   extensions: [
     StarterKit,
     Columns,
     Column,
-    // 【新增注册】：将斜杠命令和它的配置注入到编辑器中！
     SlashCommand.configure({
-      suggestion: slashSuggestion
+      suggestion: slashSuggestion,
     })
   ],
-  // 确保传入的回调参数类型正确
-  onUpdate: ({ editor }) => extractHeadings(editor as Editor),
-  onCreate: ({ editor }) => extractHeadings(editor as Editor)
+  onUpdate: ({ editor }) => {
+    extractHeadings(editor as Editor)
+    handleEditorScroll() // 内容更新时也重新计算一下高亮
+  },
+  onCreate: ({ editor }) => {
+    extractHeadings(editor as Editor)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -161,16 +209,30 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
+/* 大纲基础样式 */
 .toc-item {
-  padding: 6px 0;
+  padding: 6px 8px;
   font-size: 14px;
   cursor: pointer;
   color: #555;
+  border-radius: 4px;
+  margin: 2px 8px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .toc-item:hover {
+  background-color: #efefed;
   color: #000;
-  font-weight: 500;
+}
+
+/* --- 新增：大纲高亮状态样式 --- */
+.toc-item.is-active {
+  background-color: #e5e5e5;
+  color: #000;
+  font-weight: 600;
 }
 
 .toc-empty {
@@ -232,11 +294,13 @@ onBeforeUnmount(() => {
   font-size: 16px;
 }
 
-/* 编辑器容器 */
+/* 编辑器容器 - 设置 scroll-behavior 实现平滑滚动 */
 .editor-container {
   flex: 1;
   overflow-y: auto;
   padding: 40px 60px;
+  scroll-behavior: smooth;
+  /* 开启原生平滑滚动 */
 }
 
 .editor-content {
