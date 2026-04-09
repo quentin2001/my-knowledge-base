@@ -126,44 +126,39 @@ const handleDrop = (): void => {
   }
 }
 </script>
-
 <style scoped>
 .node-content {
   display: flex;
   align-items: center;
   padding: 6px 8px;
   cursor: pointer;
-  color: #a3a3a3;
+  color: var(--text-main);
   font-size: 14px;
   user-select: none;
   border-radius: 4px;
   margin: 1px 4px;
-  transition: all 0.2s;
-  box-sizing: border-box;
+  transition: all 0.1s ease;
   border: 1px solid transparent;
+  box-sizing: border-box;
 }
 .node-content:hover {
-  background-color: #333;
-  color: #fff;
+  background-color: var(--item-hover);
 }
 .node-content.is-active {
-  background-color: #4a4a4a;
-  color: #fff;
-  font-weight: bold;
+  background-color: var(--item-active);
+  font-weight: 600;
 }
-
-/* 【新增】：拖拽悬浮时的极致视觉反馈 */
 .node-content.is-drag-over {
-  background-color: rgba(104, 206, 248, 0.15);
-  border: 1px dashed #68cef8;
-  color: #fff;
+  background-color: var(--item-active);
+  border: 1px dashed var(--text-active);
 }
 
 .icon {
   margin-right: 6px;
-  font-size: 12px;
-  width: 14px;
+  font-size: 14px;
+  width: 16px;
   text-align: center;
+  color: var(--text-muted);
 }
 .arrow {
   transition: transform 0.2s;

@@ -3,6 +3,13 @@
     <aside class="sidebar-files" @contextmenu.prevent="showRootContextMenu($event)">
       <div class="sidebar-header">
         <span>📚 我的知识库</span>
+        <button
+          class="theme-btn"
+          :title="isDarkMode ? '切换到浅色模式' : '切换到深色模式'"
+          @click="toggleTheme"
+        >
+          {{ isDarkMode ? '☀️' : '🌙' }}
+        </button>
       </div>
 
       <draggable
@@ -95,6 +102,36 @@ const activeFilePath = ref<string>('')
 const editorRef = ref<EditorComponent | null>(null)
 const openedFolders = ref<Set<string>>(new Set())
 const rootWorkspacePath = ref<string>('')
+
+// 【新增】：主题状态
+const isDarkMode = ref(false)
+
+const toggleTheme = (): void => {
+  isDarkMode.value = !isDarkMode.value
+  if (isDarkMode.value) {
+    document.body.classList.add('dark-theme')
+    localStorage.setItem('theme', 'dark')
+  } else {
+    document.body.classList.remove('dark-theme')
+    localStorage.setItem('theme', 'light')
+  }
+}
+
+// 【修改】：在 onMounted 中初始化主题
+onMounted(async () => {
+  const savedTheme = localStorage.getItem('theme')
+  if (savedTheme === 'dark') {
+    isDarkMode.value = true
+    document.body.classList.add('dark-theme')
+  }
+
+  window.addEventListener('click', closeContextMenu)
+  await loadFiles()
+  if (notes.value.length > 0) {
+    const firstFile = notes.value.find((n) => n.type === 'file')
+    if (firstFile) openNote(firstFile)
+  }
+})
 
 // 【新增核心魔法】：创建一个全局共享的“幽灵变量”，记住你按下了谁
 const globalDraggedNode = ref<FileNode | null>(null)
@@ -321,12 +358,42 @@ onBeforeUnmount(() => {
   window.removeEventListener('click', closeContextMenu)
 })
 </script>
-
 <style>
+/* ==================== Notion 原生色彩系统 ==================== */
+:root {
+  --bg-main: #ffffff; /* 正文纯白背景 */
+  --bg-sidebar: #f7f7f5; /* 侧边栏极浅的暖灰色 */
+  --bg-panel: #ffffff; /* 弹窗背景 */
+  --text-main: #37352f; /* Notion 经典的深墨色文字 */
+  --text-muted: #787774; /* 弱化文字 */
+  --border-light: #ededeb; /* 极柔和的分割线 */
+  --item-hover: #efefed; /* 鼠标悬停背景 */
+  --item-active: rgba(35, 131, 226, 0.08); /* 选中时的淡蓝色 */
+  --text-active: #2383e2; /* 选中时的蓝色文字 */
+  --shadow-sm: rgba(15, 15, 15, 0.05) 0px 0px 0px 1px, rgba(15, 15, 15, 0.1) 0px 3px 6px;
+  --shadow-lg: rgba(15, 15, 15, 0.05) 0px 0px 0px 1px, rgba(15, 15, 15, 0.2) 0px 9px 24px;
+}
+
+body.dark-theme {
+  --bg-main: #191919; /* Notion 深色正文背景 */
+  --bg-sidebar: #202020; /* 深色侧边栏 */
+  --bg-panel: #252525; /* 深色弹窗 */
+  --text-main: rgba(255, 255, 255, 0.81); /* 深色模式下不刺眼的高级白 */
+  --text-muted: rgba(255, 255, 255, 0.44);
+  --border-light: #2f2f2f;
+  --item-hover: #2f2f2f;
+  --item-active: rgba(35, 131, 226, 0.28);
+  --text-active: #5ea8f4;
+  --shadow-sm: rgba(15, 15, 15, 0.1) 0px 0px 0px 1px, rgba(15, 15, 15, 0.2) 0px 3px 6px;
+  --shadow-lg: rgba(15, 15, 15, 0.1) 0px 0px 0px 1px, rgba(15, 15, 15, 0.4) 0px 9px 24px;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  background-color: #f5f7fa;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, 'Apple Color Emoji', Arial, sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-main);
 }
 .app-container {
   display: flex;
@@ -334,25 +401,39 @@ body {
   width: 100vw;
   overflow: hidden;
 }
+
+/* 侧边栏样式接入变量 */
 .sidebar-files {
   width: 260px;
-  background-color: #202020;
-  color: #a3a3a3;
+  background-color: var(--bg-sidebar);
+  color: var(--text-main);
   display: flex;
   flex-direction: column;
-  border-right: 1px solid #111;
+  border-right: 1px solid var(--border-light);
 }
 .sidebar-header {
-  padding: 16px;
-  font-size: 13px;
-  font-weight: bold;
-  color: #fff;
-  letter-spacing: 1px;
+  padding: 14px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #333;
 }
+.theme-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  transition: background 0.2s;
+}
+.theme-btn:hover {
+  background: var(--item-hover);
+}
+
 .file-list {
   padding: 10px 8px;
   overflow-y: auto;
@@ -362,21 +443,24 @@ body {
   flex: 1;
   display: flex;
   min-width: 0;
+  background-color: var(--bg-main);
 }
+
+/* 弹窗与右键菜单接入变量 */
 .context-menu {
   position: fixed;
-  background: #2a2a2a;
-  border: 1px solid #444;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-sm);
   padding: 4px;
   z-index: 9999;
-  min-width: 140px;
+  min-width: 160px;
 }
 .context-menu .menu-item {
   padding: 6px 12px;
-  font-size: 13px;
-  color: #ccc;
+  font-size: 14px;
+  color: var(--text-main);
   cursor: pointer;
   border-radius: 4px;
   display: flex;
@@ -384,58 +468,59 @@ body {
   gap: 6px;
 }
 .context-menu .menu-item:hover {
-  background: #444;
-  color: #fff;
+  background: var(--item-hover);
 }
 .context-menu .menu-item.delete:hover {
-  background: #e03131;
+  background: #eb5757;
   color: #fff;
-}
+} /* Notion 红 */
 .divider {
   height: 1px;
-  background: #444;
+  background: var(--border-light);
   margin: 4px 0;
 }
+
 .rename-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10000;
 }
 .rename-modal {
-  background: #2a2a2a;
-  border: 1px solid #444;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
   border-radius: 8px;
   padding: 20px;
   width: 300px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
 }
 .modal-title {
-  color: #fff;
-  font-weight: bold;
+  color: var(--text-main);
+  font-weight: 600;
   margin-bottom: 12px;
-  font-size: 14px;
+  font-size: 15px;
 }
 .rename-input-large {
   width: 100%;
   box-sizing: border-box;
-  background: #1a1a1a;
-  border: 1px solid #555;
-  color: #fff;
+  background: var(--bg-main);
+  border: 1px solid var(--border-light);
+  color: var(--text-main);
   border-radius: 4px;
   padding: 8px 12px;
   font-size: 14px;
   outline: none;
   margin-bottom: 16px;
+  transition: border-color 0.2s;
 }
 .rename-input-large:focus {
-  border-color: #68cef8;
+  border-color: var(--text-active);
 }
 .modal-actions {
   display: flex;
@@ -446,24 +531,24 @@ body {
 .btn-confirm {
   padding: 6px 12px;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
   border: none;
+  font-weight: 500;
 }
 .btn-cancel {
-  background: #444;
-  color: #ccc;
+  background: transparent;
+  color: var(--text-muted);
 }
 .btn-cancel:hover {
-  background: #555;
-  color: #fff;
+  background: var(--item-hover);
+  color: var(--text-main);
 }
 .btn-confirm {
-  background: #68cef8;
-  color: #000;
-  font-weight: bold;
+  background: #2383e2;
+  color: #fff;
 }
 .btn-confirm:hover {
-  background: #56b2d8;
+  background: #1b6fbf;
 }
 </style>

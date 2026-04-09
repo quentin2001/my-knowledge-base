@@ -1,50 +1,69 @@
 <template>
-  <div class="app-layout">
-    <aside v-show="showToc" class="sidebar-toc">
-      <div class="toc-header">
-        <span class="toc-title">📑 页面大纲</span>
-        <button class="icon-btn" title="隐藏大纲" @click="showToc = false">◂</button>
-      </div>
-      <div class="toc-content">
-        <div
-          v-for="(heading, index) in headings"
-          :key="index"
-          class="toc-item"
-          :class="{ 'is-active': index === activeHeadingIndex }"
-          :style="{ paddingLeft: `${(heading.level - 1) * 16}px` }"
-          @click="scrollToHeading(heading.pos, index)"
+  <div class="editor-wrapper">
+    <header class="editor-header">
+      <div class="header-left">
+        <button
+          class="tool-btn"
+          :class="{ 'is-active': showToc }"
+          title="页面大纲"
+          @click="showToc = !showToc"
         >
-          {{ heading.text }}
-        </div>
-        <div v-if="headings.length === 0" class="toc-empty">暂无标题</div>
-      </div>
-    </aside>
-
-    <main class="main-workspace">
-      <div class="status-bar">
-        <button v-if="!showToc" class="text-btn" @click="showToc = true">▸ 显示大纲</button>
-        <button v-if="!showToolbar" class="text-btn" @click="showToolbar = true">
-          ▾ 显示工具栏
+          📑 大纲
         </button>
-        <button class="text-btn action-btn" @click="importMarkdown">📂 导入 .md</button>
-        <button class="text-btn action-btn" @click="exportMarkdown">💾 导出 .md</button>
+        <div class="header-divider"></div>
+        <button class="tool-btn" title="导入 Markdown" @click="importMarkdown">📥 导入</button>
+        <button class="tool-btn" title="导出 Markdown" @click="exportMarkdown">📤 导出</button>
       </div>
 
-      <header v-show="showToolbar" class="top-toolbar">
-        <div class="toolbar-group">
-          <button @click="editor?.chain().focus().toggleBold().run()"><b>B</b> 加粗</button>
-          <button @click="editor?.chain().focus().toggleHeading({ level: 2 }).run()">H2</button>
-          <button @click="editor?.chain().focus().setColumns(2).run()">◫ 双列布局</button>
+      <div class="header-right"></div>
+    </header>
+
+    <div class="editor-layout">
+      <Transition name="slide-left">
+        <aside v-if="showToc" class="toc-sidebar">
+          <div class="toc-header">目录</div>
+          <div class="toc-content">
+            <div
+              v-for="(heading, index) in headings"
+              :key="index"
+              class="toc-item"
+              :class="{ 'is-active': activeHeadingIndex === index }"
+              :style="{ paddingLeft: (heading.level - 1) * 12 + 12 + 'px' }"
+              @click="scrollToHeading(heading.pos, index)"
+            >
+              {{ heading.text }}
+            </div>
+            <div v-if="headings.length === 0" class="empty-toc">暂无标题</div>
+          </div>
+        </aside>
+      </Transition>
+
+      <main class="editor-main">
+        <div v-if="editor" class="format-toolbar">
+          <button
+            class="format-btn"
+            :class="{ 'is-active': editor.isActive('bold') }"
+            @click="editor.chain().focus().toggleBold().run()"
+          >
+            B 加粗
+          </button>
+          <button
+            class="format-btn"
+            :class="{ 'is-active': editor.isActive('heading', { level: 2 }) }"
+            @click="editor.chain().focus().toggleHeading({ level: 2 }).run()"
+          >
+            H2
+          </button>
+          <button class="format-btn" @click="editor.chain().focus().setColumns(2).run()">
+            ⏸ 双列布局
+          </button>
         </div>
-        <button class="icon-btn hide-toolbar-btn" title="隐藏工具栏" @click="showToolbar = false">
-          ▴
-        </button>
-      </header>
 
-      <div ref="editorContainerRef" class="editor-container" @scroll="handleEditorScroll">
-        <EditorContent :editor="editor" class="editor-content" />
-      </div>
-    </main>
+        <div class="editor-scroll-area" @click="focusEditorBottom">
+          <editor-content :editor="editor" class="tiptap-content" />
+        </div>
+      </main>
+    </div>
   </div>
 </template>
 
@@ -76,7 +95,15 @@ import { Column } from '../extensions/Column'
 import SlashCommand, { slashSuggestion } from '../extensions/slashCommand'
 
 const showToc = ref(true)
-const showToolbar = ref(true)
+
+// 【新增】：点击外部空白处，智能将光标聚焦到文档末尾
+const focusEditorBottom = (e: MouseEvent): void => {
+  const target = e.target as HTMLElement
+  // 只有当点击的确实是外层空白区域（而不是文字本身）时，才触发聚焦到底部
+  if (target.classList.contains('editor-scroll-area') && editor.value) {
+    editor.value.chain().focus('end').run()
+  }
+}
 
 interface HeadingItem {
   level: number
@@ -299,186 +326,188 @@ defineExpose({
   loadContent
 })
 </script>
-
 <style scoped>
-/* 初始化重置 */
-* {
-  box-sizing: border-box;
-}
-
-/* 整体布局 */
-.app-layout {
-  display: flex;
-  height: 100vh;
-  width: 100vw;
-  overflow: hidden;
-  background-color: #ffffff;
-  color: #333;
-  text-align: left;
-}
-
-/* 左侧大纲 */
-.sidebar-toc {
-  width: 260px;
-  background-color: #f7f7f5;
-  border-right: 1px solid #e5e5e5;
+.editor-wrapper {
   display: flex;
   flex-direction: column;
+  height: 100vh;
+  width: 100%;
+  background-color: var(--bg-main);
+  color: var(--text-main);
 }
 
-.toc-header {
-  padding: 16px;
+/* 1. 顶部操作栏 */
+.editor-header {
+  flex-shrink: 0;
+  height: 52px;
   display: flex;
   justify-content: space-between;
-  border-bottom: 1px solid #e5e5e5;
-  font-weight: bold;
+  align-items: center;
+  padding: 0 20px;
+  background: var(--bg-main);
+  border-bottom: 1px solid var(--border-light);
+}
+.header-left,
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tool-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+}
+.tool-btn:hover {
+  background: var(--item-hover);
+  color: var(--text-main);
+}
+.tool-btn.is-active {
+  background: var(--item-active);
+  color: var(--text-active);
+  font-weight: 500;
+}
+.header-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--border-light);
+  margin: 0 6px;
 }
 
+/* 2. 下方左右分栏布局 */
+.editor-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  background-color: var(--bg-main);
+}
+
+/* 3. 左侧大纲栏 */
+.toc-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background-color: var(--bg-sidebar);
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.toc-header {
+  padding: 16px 20px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
 .toc-content {
-  padding: 16px;
+  flex: 1;
   overflow-y: auto;
+  padding: 8px 12px;
 }
-
-/* 大纲基础样式 */
 .toc-item {
   padding: 6px 8px;
+  margin-bottom: 2px;
+  border-radius: 6px;
   font-size: 14px;
+  color: var(--text-main);
   cursor: pointer;
-  color: #555;
-  border-radius: 4px;
-  margin: 2px 8px;
-  transition: all 0.2s ease;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: all 0.1s ease;
 }
-
 .toc-item:hover {
-  background-color: #efefed;
-  color: #000;
+  background-color: var(--item-hover);
 }
-
-/* --- 新增：大纲高亮状态样式 --- */
 .toc-item.is-active {
-  background-color: #e5e5e5;
-  color: #000;
-  font-weight: 600;
+  background-color: var(--item-active);
+  color: var(--text-active);
+  font-weight: 500;
 }
-
-.toc-empty {
-  color: #999;
-  font-size: 13px;
+.empty-toc {
+  color: var(--text-muted);
   text-align: center;
-  margin-top: 20px;
+  padding: 20px 0;
+  font-size: 13px;
 }
 
-/* 主工作区 */
-.main-workspace {
+/* 4. 右侧编辑器主体 */
+.editor-main {
   flex: 1;
   display: flex;
   flex-direction: column;
   position: relative;
+  min-width: 0;
 }
-
-.status-bar {
-  position: absolute;
-  top: 10px;
-  left: 10px;
+.format-toolbar {
+  flex-shrink: 0;
+  padding: 8px 40px;
+  background: var(--bg-main);
+  display: flex;
+  gap: 8px;
   z-index: 10;
-  display: flex;
-  gap: 10px;
+  border-bottom: 1px solid var(--border-light);
 }
-
-.text-btn {
-  background: #f0f0f0;
-  border: 1px solid #ddd;
-  padding: 4px 8px;
-  border-radius: 4px;
+.format-btn {
+  background: var(--bg-main);
+  border: 1px solid var(--border-light);
+  color: var(--text-main);
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 12px;
+  transition: all 0.2s;
+}
+.format-btn:hover {
+  background: var(--item-hover);
+  border-color: var(--text-muted);
+}
+.format-btn.is-active {
+  background: var(--item-hover);
+  border-color: var(--text-muted);
+  font-weight: 600;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
-/* 顶部工具栏 */
-.top-toolbar {
-  display: flex;
-  justify-content: space-between;
-  padding: 10px 20px;
-  background: rgba(255, 255, 255, 0.95);
-  border-bottom: 1px solid #e5e5e5;
-  z-index: 5;
-}
-
-.toolbar-group button {
-  margin-right: 8px;
-  padding: 6px 12px;
-  border: 1px solid #ddd;
-  background: white;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.icon-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 16px;
-}
-
-/* 编辑器容器 - 设置 scroll-behavior 实现平滑滚动 */
-.editor-container {
+.editor-scroll-area {
   flex: 1;
   overflow-y: auto;
-  padding: 40px 60px;
-  scroll-behavior: smooth;
-  /* 开启原生平滑滚动 */
+  padding: 20px 60px 80px;
+  cursor: text;
 }
-
-.editor-content {
+.tiptap-content {
   max-width: 800px;
   margin: 0 auto;
   outline: none;
 }
 
-:deep(.tiptap) {
-  outline: none;
-  min-height: 500px;
+/* 【核心修复】：确保编辑器内的文字颜色跟随主题 */
+:deep(.ProseMirror) {
+  outline: none !important;
+  border: none !important;
+  min-height: calc(100vh - 200px);
+  color: var(--text-main); /* 跟随主题变色 */
+}
+:deep(.ProseMirror:focus) {
+  outline: none !important;
 }
 
-/* 分栏样式 */
-:deep(.tiptap-columns) {
-  display: flex;
-  gap: 16px;
-  margin: 1rem 0;
-  width: 100%;
+/* 进出场动画 */
+.slide-left-enter-active,
+.slide-left-leave-active {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
-
-:deep(.tiptap-column) {
-  flex: 1 1 0%;
-  min-width: 0;
-  padding: 8px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 4px;
-  background: #f8fafc;
-}
-
-/* --- 优化图片显示 --- */
-:deep(.tiptap img) {
-  max-width: 100%;
-  height: auto;
-  border-radius: 6px;
-  margin: 1.5rem 0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  border: 1px solid #eee;
-  transition: all 0.2s ease-in-out;
-}
-
-:deep(.tiptap img.ProseMirror-selectednode) {
-  outline: 3px solid #68cef8;
-  /* 选中图片时的发光边框 */
-}
-
-.action-btn {
-  font-weight: bold;
-  color: #444;
+.slide-left-enter-from,
+.slide-left-leave-to {
+  margin-left: -240px;
+  opacity: 0;
 }
 </style>
