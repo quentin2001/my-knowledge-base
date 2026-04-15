@@ -2,20 +2,27 @@
   <div class="editor-wrapper">
     <header class="editor-header">
       <div class="header-left">
-        <button
-          class="tool-btn"
-          :class="{ 'is-active': showToc }"
-          title="页面大纲"
-          @click="showToc = !showToc"
-        >
+        <button class="tool-btn" :class="{ 'is-active': showToc }" @click="showToc = !showToc">
           📑 大纲
         </button>
         <div class="header-divider"></div>
-        <button class="tool-btn" title="导入 Markdown" @click="importMarkdown">📥 导入</button>
-        <button class="tool-btn" title="导出 Markdown" @click="exportMarkdown">📤 导出</button>
-      </div>
 
-      <div class="header-right"></div>
+        <div class="menu-container">
+          <button class="tool-btn" @click.stop="toggleMenu('open')">📂 打开 ▾</button>
+          <div v-if="activeMenu === 'open'" class="dropdown-menu">
+            <div class="menu-item" @click.stop="handleOpen('file')">打开文件</div>
+            <div class="menu-item" @click.stop="handleOpen('folder')">打开文件夹</div>
+          </div>
+        </div>
+
+        <div class="menu-container">
+          <button class="tool-btn" @click.stop="toggleMenu('export')">📤 导出 ▾</button>
+          <div v-if="activeMenu === 'export'" class="dropdown-menu">
+            <div class="menu-item" @click.stop="handleExport('current')">导出当前文档</div>
+            <div class="menu-item" @click.stop="handleExport('all')">导出整个文件夹</div>
+          </div>
+        </div>
+      </div>
     </header>
 
     <div class="editor-layout">
@@ -68,7 +75,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onBeforeUnmount, Ref } from 'vue'
+import { ref, onBeforeUnmount, Ref, onMounted } from 'vue'
 import { useEditor, EditorContent, Editor } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
@@ -179,6 +186,50 @@ const extractHeadings = (editorInstance: Editor): void => {
   })
   headings.value = extractedHeadings
 }
+
+const activeMenu = ref<string | null>(null)
+
+// 切换菜单显示
+const toggleMenu = (menu: string): void => {
+  activeMenu.value = activeMenu.value === menu ? null : menu
+}
+
+// 处理打开请求
+const handleOpen = async (type: 'file' | 'folder'): Promise<void> => {
+  // 【新增追踪】：打印日志，用来确认按钮真的被按下了
+  console.log(`👉 [步骤1] 前端按钮已点击，准备打开: ${type}`)
+  activeMenu.value = null
+  try {
+    await window.api.openExternal(type)
+  } catch (err) {
+    console.error('❌ 前端调用 openExternal 失败:', err)
+  }
+}
+
+// 【修复 2】：定义 props，接收 App.vue 传过来的路径数据
+const props = defineProps<{
+  currentPath: string
+  workspacePath: string
+}>()
+
+// 处理导出请求
+const handleExport = async (type: 'current' | 'all'): Promise<void> => {
+  activeMenu.value = null
+  // 假设当前文档路径为 currentPath，工作区路径为 workspacePath (需要从父组件或 store 获取)
+  const source = type === 'current' ? props.currentPath : props.workspacePath
+  const success = await window.api.exportToExternal(source, type)
+  if (success) {
+    console.log('导出成功')
+  }
+}
+
+// 点击外部关闭菜单
+onMounted(() => {
+  window.addEventListener('click', () => {
+    activeMenu.value = null
+  })
+})
+
 // ==================== 图片处理完全体 ====================
 
 // 上传并插入图片的函数
@@ -275,39 +326,7 @@ const editor = useEditor({
     extractHeadings(editor as Editor)
   }
 })
-// ==================== Markdown 导入导出 ====================
 
-// 【新增】：定义一个极其严谨的类型，彻底抛弃 any
-interface MarkdownStorage {
-  markdown: {
-    getMarkdown: () => string
-  }
-}
-
-const exportMarkdown = async (): Promise<void> => {
-  if (!editor.value) return
-
-  // 【终极修复】：听从 TS 的建议，先转为 unknown，再转为我们的目标类型
-  const mdContent = (editor.value.storage as unknown as MarkdownStorage).markdown.getMarkdown()
-
-  // 调用 Electron 主进程的导出弹窗
-  const success = await window.electron.ipcRenderer.invoke('export-md', mdContent)
-  if (success) {
-    alert('🎉 导出成功！')
-  }
-}
-
-const importMarkdown = async (): Promise<void> => {
-  if (!editor.value) return
-
-  const mdContent = await window.electron.ipcRenderer.invoke('import-md')
-  if (mdContent) {
-    // 将读取到的 md 字符串重新渲染进编辑器
-    editor.value.commands.setContent(mdContent)
-    alert('✨ 导入成功！')
-  }
-}
-// ========================================================
 onBeforeUnmount(() => {
   if (editor.value) {
     editor.value.destroy()
@@ -509,5 +528,36 @@ defineExpose({
 .slide-left-leave-to {
   margin-left: -240px;
   opacity: 0;
+}
+.menu-container {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  min-width: 140px;
+  padding: 4px;
+}
+
+.dropdown-menu .menu-item {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-main);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.dropdown-menu .menu-item:hover {
+  background: var(--item-hover);
 }
 </style>

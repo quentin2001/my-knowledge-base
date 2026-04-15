@@ -1,15 +1,25 @@
-import { app, shell, BrowserWindow, ipcMain, protocol, net, dialog } from 'electron'
+import {
+  app,
+  shell,
+  BrowserWindow,
+  ipcMain,
+  protocol,
+  net,
+  dialog,
+  OpenDialogOptions
+} from 'electron'
 import { join, dirname, basename } from 'path'
-import fs from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import fs from 'fs-extra' // 建议安装 npm install fs-extra 处理文件夹拷贝更方便
 
-function createWindow(): void {
-  // Create the browser window.
+// 【新增】：记录每个窗口 ID 对应的专属路径
+const windowStates = new Map<number, { folderPath?: string; fileToOpen?: string }>()
+function createWindow(folderPath?: string, fileToOpen?: string): void {
   const mainWindow = new BrowserWindow({
     width: 900,
     height: 670,
-    show: false,
+    show: false, // 默认隐藏，防止白屏闪烁
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
@@ -17,27 +27,30 @@ function createWindow(): void {
       sandbox: false
     }
   })
-  // 加上这一行，让它每次启动都自动打开调试工具！
-  mainWindow.webContents.openDevTools()
+
+  // 【新增】：在窗口还健在时，提前把 ID 存到安全的局部变量里
+  const currentWebContentsId = mainWindow.webContents.id
+
+  // 【核心魔法】：立刻在小本本上登记它的 ID 和 路径
+  windowStates.set(currentWebContentsId, { folderPath, fileToOpen })
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
-    return { action: 'deny' }
+  // 窗口关闭时，从小本本上划掉，防止内存泄漏
+  mainWindow.on('closed', () => {
+    // 【修复】：使用提前存好的 ID 进行清理，绝对安全！
+    windowStates.delete(currentWebContentsId)
   })
 
   // HMR for renderer base on electron-vite cli.
-  // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 }
-
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
@@ -78,6 +91,73 @@ app.whenReady().then(() => {
       return null
     }
   })
+
+  // --- 【处理打开逻辑】 ---
+  ipcMain.handle('open-external', async (event, type: 'file' | 'folder') => {
+    try {
+      console.log(`👉 [步骤2] 主进程已收到请求，准备弹出系统框: ${type}`)
+
+      // 【核心修复】：通过发送事件的 webContents，精准反查出是哪个窗口点的按钮
+      const currentWindow = BrowserWindow.fromWebContents(event.sender) || undefined
+
+      const options: OpenDialogOptions = {
+        title: type === 'file' ? '选择 Markdown 文件' : '选择知识库文件夹',
+        properties: type === 'file' ? ['openFile'] : ['openDirectory'],
+        filters: type === 'file' ? [{ name: 'Markdown', extensions: ['md'] }] : []
+      }
+
+      // 强制依附在当前窗口上，绝对不会跑到后台或崩溃
+      const result = currentWindow
+        ? await dialog.showOpenDialog(currentWindow, options)
+        : await dialog.showOpenDialog(options)
+
+      console.log(`👉 [步骤3] 用户选择结果:`, result)
+
+      if (!result.canceled && result.filePaths.length > 0) {
+        const targetPath = result.filePaths[0]
+        const isFile = fs.statSync(targetPath).isFile()
+
+        const workspacePath = isFile ? dirname(targetPath) : targetPath
+        const targetFile = isFile ? targetPath : undefined
+
+        console.log(`👉 [步骤4] 准备创建新窗口, 目录: ${workspacePath}, 文件: ${targetFile}`)
+        createWindow(workspacePath, targetFile)
+      }
+    } catch (error) {
+      console.error('❌ [步骤 X] 主进程处理打开事件时遭遇致命错误:', error)
+    }
+  })
+
+  // --- 【新增】：处理导出逻辑 ---
+  ipcMain.handle(
+    'export-to-external',
+    async (_event, sourcePath: string, type: 'current' | 'all') => {
+      const isFolder = type === 'all'
+      const result = await dialog.showSaveDialog({
+        title: isFolder ? '选择导出文件夹位置' : '导出当前文档',
+        defaultPath: isFolder ? '我的笔记导出' : '未命名文档.md',
+        buttonLabel: '点击导出'
+      })
+
+      if (!result.filePath) return false
+
+      try {
+        if (isFolder) {
+          // 使用 fs-extra 的 copySync 递归拷贝整个文件夹
+          await fs.copy(sourcePath, result.filePath)
+        } else {
+          // 拷贝单个文件
+          await fs.copy(sourcePath, result.filePath)
+        }
+        // 成功后自动打开所在文件夹（Notion 式的贴心体验）
+        shell.showItemInFolder(result.filePath)
+        return true
+      } catch (err) {
+        console.error('导出失败:', err)
+        return false
+      }
+    }
+  )
 
   // --- 【新增】：导出 Markdown 文件 ---
   ipcMain.handle('export-md', async (_event, markdownContent: string) => {
@@ -196,9 +276,10 @@ app.whenReady().then(() => {
 
     return result
   }
-  ipcMain.handle('get-notes-list', async () => {
+  // 【修改】：接收自定义路径，如果没有传，就默认使用工作区(workspaceDir)
+  ipcMain.handle('get-notes-list', async (_event, customPath?: string) => {
     try {
-      return buildFileTree(workspaceDir)
+      return buildFileTree(customPath || workspaceDir)
     } catch (error) {
       console.error('读取目录树失败:', error)
       return []
@@ -375,3 +456,9 @@ app.on('window-all-closed', () => {
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.
+
+// 【新增】：前端通过这个通道，来查询自己的身世（专属路径）
+ipcMain.handle('get-window-env', (event) => {
+  // event.sender.id 就是发出请求的那个窗口的 ID
+  return windowStates.get(event.sender.id) || null
+})

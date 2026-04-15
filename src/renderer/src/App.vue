@@ -67,7 +67,11 @@
     </div>
 
     <main class="main-content">
-      <TiptapEditor ref="editorRef" />
+      <TiptapEditor
+        ref="editorRef"
+        :current-path="activeFilePath"
+        :workspace-path="rootWorkspacePath"
+      />
     </main>
   </div>
 </template>
@@ -116,8 +120,22 @@ const toggleTheme = (): void => {
     localStorage.setItem('theme', 'light')
   }
 }
+// 【新增】：抹平 Windows 和 Mac 路径差异的工具函数
+const normalizePath = (p: string): string => p.replace(/\\/g, '/')
 
-// 【修改】：在 onMounted 中初始化主题
+const findNodeByPath = (nodes: FileNode[], targetPath: string): FileNode | null => {
+  const targetNorm = normalizePath(targetPath)
+  for (const node of nodes) {
+    // 【修复】：对比前先统一转换成标准格式
+    if (normalizePath(node.path) === targetNorm) return node
+    if (node.children) {
+      const found = findNodeByPath(node.children, targetPath)
+      if (found) return found
+    }
+  }
+  return null
+}
+
 onMounted(async () => {
   const savedTheme = localStorage.getItem('theme')
   if (savedTheme === 'dark') {
@@ -126,13 +144,38 @@ onMounted(async () => {
   }
 
   window.addEventListener('click', closeContextMenu)
-  await loadFiles()
-  if (notes.value.length > 0) {
-    const firstFile = notes.value.find((n) => n.type === 'file')
-    if (firstFile) openNote(firstFile)
+
+  // ==================== 终极路径加载逻辑 ====================
+  // 1. 新窗口一睁眼，主动去问主进程要自己的专属参数
+  const env = await window.api.getWindowEnv()
+
+  // 2. 如果查到了（说明是点击“打开”弹出的新窗口）
+  if (env && env.folderPath) {
+    const customPath = env.folderPath
+    const initialFile = env.fileToOpen
+
+    rootWorkspacePath.value = customPath
+    await loadFiles(customPath)
+
+    if (initialFile && notes.value.length > 0) {
+      const targetNode = findNodeByPath(notes.value, initialFile)
+      if (targetNode) {
+        openNote(targetNode)
+      }
+    } else if (notes.value.length > 0) {
+      const firstFile = notes.value.find((n) => n.type === 'file')
+      if (firstFile) openNote(firstFile)
+    }
+  }
+  // 3. 如果没查到（说明是双击图标正常启动的主窗口）
+  else {
+    await loadFiles()
+    if (notes.value.length > 0) {
+      const firstFile = notes.value.find((n) => n.type === 'file')
+      if (firstFile) openNote(firstFile)
+    }
   }
 })
-
 // 【新增核心魔法】：创建一个全局共享的“幽灵变量”，记住你按下了谁
 const globalDraggedNode = ref<FileNode | null>(null)
 provide('globalDraggedNode', globalDraggedNode)
@@ -157,11 +200,11 @@ const restoreFolderState = (nodes: FileNode[]): void => {
   }
 }
 
-const loadFiles = async (): Promise<void> => {
-  const fileList = await window.api.getNotesList()
+// 【修改】：让 loadFiles 能够接收自定义路径
+const loadFiles = async (customPath?: string): Promise<void> => {
+  const fileList = await window.api.getNotesList(customPath)
   restoreFolderState(fileList)
   notes.value = fileList
-  // 巧妙地获取底层的根目录路径
   if (fileList.length > 0 && !rootWorkspacePath.value) {
     rootWorkspacePath.value = getParentDir(fileList[0].path)
   }
@@ -347,8 +390,26 @@ const deleteNote = async (): Promise<void> => {
 }
 
 onMounted(async () => {
+  const savedTheme = localStorage.getItem('theme')
+  if (savedTheme === 'dark') {
+    isDarkMode.value = true
+    document.body.classList.add('dark-theme')
+  }
+
   window.addEventListener('click', closeContextMenu)
-  await loadFiles()
+
+  // 【修复】：正确的解析并加载路径
+  const args = window.process?.argv || []
+  const pathArg = args.find((arg) => arg.startsWith('--initial-path='))
+
+  if (pathArg) {
+    const customPath = pathArg.split('=')[1]
+    rootWorkspacePath.value = customPath
+    await loadFiles(customPath) // 直接复用 loadFiles，传入 customPath
+  } else {
+    await loadFiles()
+  }
+
   if (notes.value.length > 0) {
     const firstFile = notes.value.find((n) => n.type === 'file')
     if (firstFile) openNote(firstFile)
